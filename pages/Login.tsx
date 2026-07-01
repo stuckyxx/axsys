@@ -1,8 +1,10 @@
 
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
+import { getPostLoginPath } from '../utils/auth.ts';
 
 // Axsys Large Logo Component for Login
 const AxsysLogoLarge = () => (
@@ -22,6 +24,7 @@ const AxsysLogoLarge = () => (
 
 export const Login: React.FC = () => {
   const { login } = useAuth();
+  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -36,7 +39,8 @@ export const Login: React.FC = () => {
       if(password.length < 3) {
         throw new Error("Senha deve ter no mínimo 3 caracteres");
       }
-      await login(email, password);
+      const user = await login(email, password);
+      navigate(getPostLoginPath(user.role), { replace: true });
     } catch (err: any) {
       setError(err.message || 'Falha ao realizar login');
     } finally {

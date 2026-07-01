@@ -5,6 +5,7 @@ import { getAllUsers, registerMock, deleteUserMock, updateUserDetailsMock, updat
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { Switch } from '../components/Switch';
+import { useTrackedStorageRefresh } from '../hooks/useTrackedStorageRefresh.ts';
 
 export const SuperAdminPanel = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'companies'>('overview');
@@ -51,6 +52,13 @@ export const SuperAdminPanel = () => {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useTrackedStorageRefresh({
+    trackedKeys: ['axsys_companies_db_v2', 'axsys_users_db_v3'],
+    refresh: () => {
+      loadData();
+    },
+  });
 
   // --- Company Management ---
   const handleSaveCompany = async () => {
@@ -400,7 +408,7 @@ export const SuperAdminPanel = () => {
 
           <div className="bg-white shadow rounded-xl border border-gray-200 overflow-hidden">
             <div className="border-b border-gray-200 bg-gray-50 px-4 sm:px-6">
-              <nav className="-mb-px flex space-x-8">
+              <nav className="-mb-px flex space-x-8 overflow-x-auto">
                 <button
                   onClick={() => setCompanyTab('dados')}
                   className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
@@ -472,9 +480,9 @@ export const SuperAdminPanel = () => {
               {/* Company Users Tab */}
               {companyTab === 'usuarios' && (
                 <div className="space-y-6">
-                  <div className="flex justify-between items-center">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <h3 className="text-lg font-medium text-gray-900">Usuários Vinculados</h3>
-                    <Button onClick={() => { 
+                    <Button className="w-full sm:w-auto" onClick={() => { 
                       setIsEditingUser(true); 
                       setCurrentUser({ role: UserRole.USER }); 
                       setSelectedModules([SystemModule.ADMINISTRATIVE]); 
@@ -487,17 +495,17 @@ export const SuperAdminPanel = () => {
                     <ul className="divide-y divide-gray-200">
                       {companyUsers.map(user => (
                         <li key={user.id} className="p-4 hover:bg-gray-50 transition-colors">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center space-x-4">
+                          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                            <div className="flex items-center space-x-4 min-w-0">
                               <div className="flex-shrink-0">
                                 <img className="h-10 w-10 rounded-full" src={user.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random`} alt="" />
                               </div>
-                              <div>
+                              <div className="min-w-0">
                                 <p className="text-sm font-medium text-gray-900">{user.name}</p>
-                                <p className="text-sm text-gray-500">{user.email}</p>
+                                <p className="text-sm text-gray-500 break-all">{user.email}</p>
                               </div>
                             </div>
-                            <div className="flex items-center space-x-4">
+                            <div className="flex flex-wrap items-center gap-3 lg:justify-end">
                               <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${user.role === UserRole.COMPANY_ADMIN ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'}`}>
                                 {user.role === UserRole.COMPANY_ADMIN ? 'Admin da Empresa' : 'Usuário Padrão'}
                               </span>
@@ -515,7 +523,7 @@ export const SuperAdminPanel = () => {
                               </div>
                             </div>
                           </div>
-                          <div className="mt-2 ml-14">
+                          <div className="mt-2 lg:ml-14">
                             <p className="text-xs text-gray-500 font-medium mb-1">Módulos de Acesso:</p>
                             <div className="flex flex-wrap gap-1">
                               {user.allowedModules?.map(mod => (
@@ -543,9 +551,9 @@ export const SuperAdminPanel = () => {
               {/* Company Banks Tab */}
               {companyTab === 'bancos' && (
                 <div className="space-y-6">
-                  <div className="flex justify-between items-center">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <h3 className="text-lg font-medium text-gray-900">Contas Bancárias</h3>
-                    <Button onClick={() => { setIsEditingBank(true); setCurrentBank({}); }}>
+                    <Button className="w-full sm:w-auto" onClick={() => { setIsEditingBank(true); setCurrentBank({}); }}>
                       Adicionar Conta
                     </Button>
                   </div>

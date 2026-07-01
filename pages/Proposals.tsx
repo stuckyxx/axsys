@@ -1,25 +1,27 @@
 
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
+import { useTrackedStorageRefresh } from '../hooks/useTrackedStorageRefresh.ts';
 import { Proposal, ProposalItem, Client, Service, Company } from '../types';
 import { getClients } from '../services/clientService';
+import { deleteProposal, getProposals, saveProposals } from '../services/proposalService.ts';
 import { getServices } from '../services/serviceService';
 import { useAuth } from '../context/AuthContext';
-import { getCompanyById, getCompanies } from '../services/companyService';
+import { getCompanyById, getCompanySettings } from '../services/companyService';
 
 const ProposalDocumentPreview = ({ proposal, onClose }: { proposal: Proposal; onClose: () => void }) => {
     const printRef = useRef<HTMLDivElement>(null);
     const { user } = useAuth();
     
-    const [clients] = useState<Client[]>(getClients);
-    const [services] = useState<Service[]>(getServices);
+    const [clients] = useState<Client[]>(() => getClients(user));
+    const [services] = useState<Service[]>(() => getServices(user));
     const [companySettings] = useState<Company>(() => {
         if (user?.companyId) {
             const company = getCompanyById(user.companyId);
             if (company) return company;
         }
-        return getCompanies()[0];
+        return getCompanySettings();
     });
 
     const client = clients.find(c => c.id === proposal.clientId);
@@ -199,7 +201,7 @@ const ProposalDocumentPreview = ({ proposal, onClose }: { proposal: Proposal; on
                                             <img 
                                                 src={companySettings.signatureUrl} 
                                                 alt="Assinatura" 
-                                                className="w-[400px] h-auto object-contain mix-blend-multiply mb-[-1rem]" 
+                                                className="w-[200px] h-auto object-contain mix-blend-multiply mb-[-1rem]" 
                                             />
                                         )}
                                         <div className="w-full border-t border-black mt-4 mb-2"></div>
@@ -219,17 +221,10 @@ const ProposalDocumentPreview = ({ proposal, onClose }: { proposal: Proposal; on
 
 export const Proposals: React.FC = () => {
   const [isEditingMode, setIsEditingMode] = useState(false);
-  const [clients] = useState<Client[]>(getClients);
-  const [services] = useState<Service[]>(getServices);
-  const [proposals, setProposals] = useState<Proposal[]>(() => {
-    const saved = localStorage.getItem('axsys_proposals_db_v2');
-    if (saved) {
-      return JSON.parse(saved);
-    }
-    const defaultProposals: Proposal[] = [];
-    localStorage.setItem('axsys_proposals_db_v2', JSON.stringify(defaultProposals));
-    return defaultProposals;
-  });
+  const { user } = useAuth();
+  const [clients, setClients] = useState<Client[]>(() => getClients(user));
+  const [services, setServices] = useState<Service[]>(() => getServices(user));
+  const [proposals, setProposals] = useState<Proposal[]>(() => getProposals(user));
 
   // Form State
   const [currentProposal, setCurrentProposal] = useState<Partial<Proposal>>({
@@ -244,6 +239,22 @@ export const Proposals: React.FC = () => {
   const [newItem, setNewItem] = useState<Partial<ProposalItem>>({ validityMonths: 12, monthlyValue: 0, serviceId: '', type: 'service', quantity: 1, unitValue: 0, serviceDescription: '' });
 
   const [previewProposal, setPreviewProposal] = useState<Proposal | null>(null);
+
+  useEffect(() => {
+      setClients(getClients(user));
+      setServices(getServices(user));
+      setProposals(getProposals(user));
+  }, [user]);
+
+  useTrackedStorageRefresh({
+    trackedKeys: ['axsys_clients_db_v2', 'axsys_services_db_v2', 'axsys_proposals_db_v2'],
+    user,
+    refresh: () => {
+      setClients(getClients(user));
+      setServices(getServices(user));
+      setProposals(getProposals(user));
+    },
+  });
 
   // Iniciar criação
   const handleCreateNew = () => {
@@ -269,7 +280,9 @@ export const Proposals: React.FC = () => {
   // Excluir
   const handleDelete = (id: string) => {
       if(confirm("Tem certeza que deseja excluir esta proposta?")) {
-          setProposals(prev => prev.filter(p => p.id !== id));
+          const updatedProposals = proposals.filter(p => p.id !== id);
+          setProposals(updatedProposals);
+          deleteProposal(id, user);
       }
   };
 
@@ -290,7 +303,7 @@ export const Proposals: React.FC = () => {
           updatedProposals = [newProp, ...proposals];
       }
       setProposals(updatedProposals);
-      localStorage.setItem('axsys_proposals_db_v2', JSON.stringify(updatedProposals));
+      saveProposals(updatedProposals, user);
       setIsEditingMode(false);
   };
 

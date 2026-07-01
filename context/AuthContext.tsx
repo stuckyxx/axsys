@@ -1,9 +1,11 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { User, AuthState, SystemModule } from '../types';
-import { loginMock } from '../services/authService';
+import { getAllUsers, loginMock } from '../services/authService';
+import { initializeRemotePersistence, resetRemotePersistenceScope } from '../services/remotePersistence';
+import { reconcileStoredSessionUser } from '../utils/auth.ts';
 
 interface AuthContextType extends AuthState {
-  login: (email: string, password?: string) => Promise<void>;
+  login: (email: string, password?: string) => Promise<User>;
   logout: () => void;
   hasAccess: (module: SystemModule) => boolean;
   refreshUser: (user: User) => void;
@@ -30,8 +32,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const user = await loginMock(email, password);
       localStorage.setItem('sgi_user_v2', JSON.stringify(user));
-      // In a real app, we would store the JWT token here
       setState({ user, isAuthenticated: true, isLoading: false });
+      void initializeRemotePersistence(user).catch((error) => {
+        console.error('Falha ao inicializar persistência remota após login', error);
+      });
+      // In a real app, we would store the JWT token here
+      return user;
     } catch (error) {
       setState(prev => ({ ...prev, isLoading: false }));
       throw error;
@@ -39,6 +45,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = useCallback(() => {
+    resetRemotePersistenceScope();
     localStorage.removeItem('sgi_user_v2');
     setState({ user: null, isAuthenticated: false, isLoading: false });
   }, []);
@@ -52,8 +59,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // If the currently logged in user is updated (e.g. via admin panel), reflect changes immediately
     if (state.user?.id === updatedUser.id) {
        localStorage.setItem('sgi_user_v2', JSON.stringify(updatedUser));
+       void initializeRemotePersistence(updatedUser);
        setState(prev => ({ ...prev, user: updatedUser }));
     }
+  }, [state.user]);
+
+  useEffect(() => {
+    if (!state.user) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const syncStoredSession = async () => {
+      try {
+        const users = await getAllUsers();
+        const freshUser = reconcileStoredSessionUser(state.user, users);
+
+        if (cancelled) {
+          return;
+        }
+
+        if (!freshUser) {
+          resetRemotePersistenceScope();
+          localStorage.removeItem('sgi_user_v2');
+          setState({ user: null, isAuthenticated: false, isLoading: false });
+          return;
+        }
+
+        const currentSnapshot = JSON.stringify(state.user);
+        const freshSnapshot = JSON.stringify(freshUser);
+
+        if (currentSnapshot !== freshSnapshot) {
+          localStorage.setItem('sgi_user_v2', JSON.stringify(freshUser));
+          await initializeRemotePersistence(freshUser);
+
+          if (!cancelled) {
+            setState(prev => ({ ...prev, user: freshUser }));
+          }
+          return;
+        }
+
+        await initializeRemotePersistence(freshUser);
+      } catch (error) {
+        console.error('Falha ao sincronizar sessão salva com a base de usuários', error);
+      }
+    };
+
+    void syncStoredSession();
+
+    return () => {
+      cancelled = true;
+    };
   }, [state.user]);
 
   return (

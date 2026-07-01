@@ -1,7 +1,9 @@
 
-import { User, UserRole, SystemModule } from '../types';
+import { User, UserRole, SystemModule } from '../types.ts';
+import { applyPasswordReset, buildRegisteredUserRecord } from '../utils/auth.ts';
+import { requestTrackedStorageSync } from './storageScope.ts';
 
-const DB_KEY = 'axsys_users_db_v2'; // Changed key to reset DB
+const DB_KEY = 'axsys_users_db_v3'; // Changed key to reset DB
 
 // Mock Data - Base Users (Seeds for the DB)
 const ADMIN_USER: User = {
@@ -19,6 +21,21 @@ const ADMIN_USER: User = {
   avatarUrl: 'https://i.pravatar.cc/150?u=admin'
 };
 
+const GABRIEL_USER: User = {
+  id: 'u-gabriel-001',
+  name: 'Gabriel Machado',
+  email: 'gabrielmachado.tkd@gmail.com',
+  password: 'g1c1v4ld0',
+  role: UserRole.SUPER_ADMIN,
+  allowedModules: [
+    SystemModule.ADMINISTRATIVE, 
+    SystemModule.FINANCIAL, 
+    SystemModule.CERTIFICATES, 
+    SystemModule.SYSTEM_ADMIN
+  ], 
+  avatarUrl: 'https://i.pravatar.cc/150?u=gabriel'
+};
+
 // --- Database Helper Functions ---
 
 const loadDatabase = (): User[] => {
@@ -27,13 +44,15 @@ const loadDatabase = (): User[] => {
     return JSON.parse(stored);
   }
   // Initialize DB if empty
-  const initialDB = [ADMIN_USER];
+  const initialDB = [ADMIN_USER, GABRIEL_USER];
   localStorage.setItem(DB_KEY, JSON.stringify(initialDB));
+  requestTrackedStorageSync(DB_KEY);
   return initialDB;
 };
 
 const saveDatabase = (users: User[]) => {
   localStorage.setItem(DB_KEY, JSON.stringify(users));
+  requestTrackedStorageSync(DB_KEY);
   // Update the exported mutable array to keep sync in memory
   MOCK_USERS_DB.length = 0;
   MOCK_USERS_DB.push(...users);
@@ -84,17 +103,20 @@ export const registerMock = async (data: any): Promise<void> => {
   return new Promise((resolve) => {
     setTimeout(() => {
       const currentDB = loadDatabase();
-      
-      const newUser: User = {
-        id: `u-${Date.now().toString(36)}`,
-        name: data.firstName || data.corporateName || data.username,
-        email: data.email,
-        role: data.role || UserRole.USER,
-        companyId: data.companyId,
-        // Default modules: Administrative by default
-        allowedModules: data.allowedModules || [SystemModule.ADMINISTRATIVE], 
-        avatarUrl: `https://ui-avatars.com/api/?name=${encodeURIComponent(data.firstName || 'U')}&background=random&color=fff`
-      };
+
+      const newUser: User = buildRegisteredUserRecord(
+        {
+          firstName: data.firstName,
+          corporateName: data.corporateName,
+          username: data.username,
+          email: data.email,
+          password: data.password,
+          role: data.role || UserRole.USER,
+          companyId: data.companyId,
+          allowedModules: data.allowedModules || [SystemModule.ADMINISTRATIVE],
+        },
+        `u-${Date.now().toString(36)}`,
+      ) as User;
 
       currentDB.push(newUser);
       saveDatabase(currentDB);
@@ -156,11 +178,8 @@ export const resetUserPasswordMock = async (userId: string, newPassword: string)
         const user = currentDB.find(u => u.id === userId);
         
         if (user) {
-            // In a real app, we would hash the password and save it. 
-            // Here we just acknowledge the action as we don't store passwords in the User object for security in this demo.
-            console.log(`Password for user ${user.email} reset to: ${newPassword}`);
-            // We simulate a DB write just to be consistent
-            saveDatabase(currentDB); 
+            const updatedUsers = applyPasswordReset(currentDB, userId, newPassword) as User[];
+            saveDatabase(updatedUsers);
             resolve();
         } else {
             reject(new Error("Usuário não encontrado para redefinir senha."));

@@ -1,37 +1,26 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Button } from './Button';
 import { Input } from './Input';
+import { useAuth } from '../context/AuthContext';
+import { useTrackedStorageRefresh } from '../hooks/useTrackedStorageRefresh.ts';
 import { getClients, saveClient, deleteClient } from '../services/clientService';
 import { getServices, saveService, deleteService } from '../services/serviceService';
 import { Client, Service, Contract, Proposal, PaymentRequest } from '../types';
+import { readCompanyScopedValue } from '../services/storageScope';
 
-const ClientDetailsView = ({ client, onBack }: { client: Client, onBack: () => void }) => {
-    const [contracts] = useState<Contract[]>(() => {
-        const savedContracts = localStorage.getItem('axsys_contracts_db_v2');
-        if (savedContracts) {
-            const allContracts: Contract[] = JSON.parse(savedContracts);
-            return allContracts.filter(c => c.clientId === client.id);
-        }
-        return [];
-    });
-
-    const [proposals] = useState<Proposal[]>(() => {
-        const savedProposals = localStorage.getItem('axsys_proposals_db_v2');
-        if (savedProposals) {
-            const allProposals: Proposal[] = JSON.parse(savedProposals);
-            return allProposals.filter(p => p.clientId === client.id);
-        }
-        return [];
-    });
-
-    const [paymentRequests] = useState<PaymentRequest[]>(() => {
-        const savedPaymentRequests = localStorage.getItem('axsys_payment_requests_v2');
-        if (savedPaymentRequests) {
-            const allRequests: PaymentRequest[] = JSON.parse(savedPaymentRequests);
-            return allRequests.filter(pr => pr.clientId === client.id);
-        }
-        return [];
-    });
+const ClientDetailsView = ({
+    client,
+    contracts,
+    proposals,
+    paymentRequests,
+    onBack,
+}: {
+    client: Client;
+    contracts: Contract[];
+    proposals: Proposal[];
+    paymentRequests: PaymentRequest[];
+    onBack: () => void;
+}) => {
 
     return (
         <div className="space-y-6 animate-in fade-in duration-300">
@@ -143,10 +132,11 @@ const ClientDetailsView = ({ client, onBack }: { client: Client, onBack: () => v
 };
 
 export const Registrations = () => {
+    const { user } = useAuth();
     const [subTab, setSubTab] = useState<'clients' | 'services'>('clients');
     
-    const [clients, setClients] = useState<Client[]>(getClients);
-    const [services, setServices] = useState<Service[]>(getServices);
+    const [clients, setClients] = useState<Client[]>(() => getClients(user));
+    const [services, setServices] = useState<Service[]>(() => getServices(user));
 
     const [isAddingClient, setIsAddingClient] = useState(false);
     const [editingClient, setEditingClient] = useState<string | null>(null);
@@ -158,6 +148,27 @@ export const Registrations = () => {
 
     const [selectedClientDetails, setSelectedClientDetails] = useState<Client | null>(null);
 
+    useEffect(() => {
+        setClients(getClients(user));
+        setServices(getServices(user));
+        setSelectedClientDetails(null);
+    }, [user]);
+
+    useTrackedStorageRefresh({
+        trackedKeys: [
+            'axsys_clients_db_v2',
+            'axsys_services_db_v2',
+            'axsys_contracts_db_v2',
+            'axsys_proposals_db_v2',
+            'axsys_payment_requests_v2',
+        ],
+        user,
+        refresh: () => {
+            setClients(getClients(user));
+            setServices(getServices(user));
+        },
+    });
+
     // Client Handlers
     const handleSaveClient = () => {
         if (!clientForm.city || !clientForm.cnpj) return;
@@ -167,8 +178,8 @@ export const Registrations = () => {
             ...clientForm,
             used: editingClient ? clients.find(c => c.id === editingClient)?.used : false
         };
-        saveClient(newClient);
-        setClients(getClients());
+        saveClient(newClient, user);
+        setClients(getClients(user));
         
         setIsAddingClient(false);
         setEditingClient(null);
@@ -182,13 +193,19 @@ export const Registrations = () => {
     };
 
     const handleDeleteClient = (id: string) => {
-        const client = clients.find(c => c.id === id);
-        if (client?.used) {
+        const linkedContracts = readCompanyScopedValue<Contract[]>('axsys_contracts_db_v2', [], user);
+        const linkedProposals = readCompanyScopedValue<Proposal[]>('axsys_proposals_db_v2', [], user);
+        const linkedRequests = readCompanyScopedValue<PaymentRequest[]>('axsys_payment_requests_v2', [], user);
+        const isLinked = linkedContracts.some(contract => contract.clientId === id)
+            || linkedProposals.some(proposal => proposal.clientId === id)
+            || linkedRequests.some(request => request.clientId === id);
+
+        if (isLinked) {
             alert('Não é possível excluir este cliente pois ele já está vinculado a propostas ou contratos.');
             return;
         }
-        deleteClient(id);
-        setClients(getClients());
+        deleteClient(id, user);
+        setClients(getClients(user));
     };
 
     const cancelClientForm = () => {
@@ -206,8 +223,8 @@ export const Registrations = () => {
             ...serviceForm,
             used: editingService ? services.find(s => s.id === editingService)?.used : false
         };
-        saveService(newService);
-        setServices(getServices());
+        saveService(newService, user);
+        setServices(getServices(user));
         
         setIsAddingService(false);
         setEditingService(null);
@@ -221,13 +238,15 @@ export const Registrations = () => {
     };
 
     const handleDeleteService = (id: string) => {
-        const service = services.find(s => s.id === id);
-        if (service?.used) {
+        const linkedProposals = readCompanyScopedValue<Proposal[]>('axsys_proposals_db_v2', [], user);
+        const isLinked = linkedProposals.some(proposal => proposal.items.some(item => item.serviceId === id));
+
+        if (isLinked) {
             alert('Não é possível excluir este serviço pois ele já foi utilizado em propostas ou contratos.');
             return;
         }
-        deleteService(id);
-        setServices(getServices());
+        deleteService(id, user);
+        setServices(getServices(user));
     };
 
     const cancelServiceForm = () => {
@@ -237,12 +256,27 @@ export const Registrations = () => {
     };
 
     if (selectedClientDetails) {
-        return <ClientDetailsView client={selectedClientDetails} onBack={() => setSelectedClientDetails(null)} />;
+        const contracts = readCompanyScopedValue<Contract[]>('axsys_contracts_db_v2', [], user)
+            .filter(contract => contract.clientId === selectedClientDetails.id);
+        const proposals = readCompanyScopedValue<Proposal[]>('axsys_proposals_db_v2', [], user)
+            .filter(proposal => proposal.clientId === selectedClientDetails.id);
+        const paymentRequests = readCompanyScopedValue<PaymentRequest[]>('axsys_payment_requests_v2', [], user)
+            .filter(request => request.clientId === selectedClientDetails.id);
+
+        return (
+            <ClientDetailsView
+                client={selectedClientDetails}
+                contracts={contracts}
+                proposals={proposals}
+                paymentRequests={paymentRequests}
+                onBack={() => setSelectedClientDetails(null)}
+            />
+        );
     }
 
     return (
         <div className="space-y-6 animate-in fade-in duration-300">
-            <div className="flex space-x-4 border-b border-slate-200 pb-2">
+            <div className="flex gap-4 overflow-x-auto border-b border-slate-200 pb-2">
                 <button
                     onClick={() => setSubTab('clients')}
                     className={`pb-2 text-sm font-bold transition-colors ${subTab === 'clients' ? 'text-brand-600 border-b-2 border-brand-600' : 'text-slate-500 hover:text-slate-800'}`}
@@ -259,10 +293,10 @@ export const Registrations = () => {
 
             {subTab === 'clients' && (
                 <div className="space-y-4">
-                    <div className="flex justify-between items-center">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <h3 className="text-lg font-bold text-slate-800">Clientes Cadastrados</h3>
                         {!isAddingClient && (
-                            <Button onClick={() => setIsAddingClient(true)}>
+                            <Button onClick={() => setIsAddingClient(true)} className="w-full sm:w-auto">
                                 + Novo Cliente
                             </Button>
                         )}
@@ -275,7 +309,7 @@ export const Registrations = () => {
                                 <div className="md:col-span-4">
                                     <Input label="Município" value={clientForm.city} onChange={e => setClientForm({...clientForm, city: e.target.value})} className="mb-0 bg-white" />
                                 </div>
-                                <div className="md:col-span-3 mb-6">
+                                <div className="md:col-span-3">
                                     <label className="block text-[13px] font-semibold text-slate-600 mb-2">Segmento</label>
                                     <select 
                                         className="block w-full rounded-xl border border-slate-200 bg-white sm:text-sm py-3 px-3 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
@@ -289,7 +323,7 @@ export const Registrations = () => {
                                 <div className="md:col-span-3">
                                     <Input label="CNPJ" value={clientForm.cnpj} onChange={e => setClientForm({...clientForm, cnpj: e.target.value})} className="mb-0 bg-white" />
                                 </div>
-                                <div className="md:col-span-2 flex gap-2 mb-6">
+                                <div className="md:col-span-2 flex flex-col gap-2 sm:flex-row">
                                     <Button variant="secondary" onClick={cancelClientForm} className="flex-1 h-[46px]">Cancelar</Button>
                                     <Button onClick={handleSaveClient} className="flex-1 h-[46px]">Salvar</Button>
                                 </div>
@@ -297,8 +331,35 @@ export const Registrations = () => {
                         </div>
                     )}
 
-                    <div className="bg-white shadow-sm border border-slate-100 rounded-xl overflow-hidden">
-                        <table className="min-w-full divide-y divide-slate-100">
+                    <div className="space-y-3 md:hidden">
+                        {clients.map(client => (
+                            <div key={client.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <h4 className="text-sm font-bold text-slate-900">{client.city}</h4>
+                                        <p className="mt-1 text-sm text-slate-500">{client.cnpj}</p>
+                                    </div>
+                                    <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-700">
+                                        {client.segment}
+                                    </span>
+                                </div>
+                                <div className="mt-4 flex flex-wrap gap-3 text-sm">
+                                    <button onClick={() => setSelectedClientDetails(client)} className="font-medium text-slate-600 hover:text-slate-800">Ver detalhes</button>
+                                    <button onClick={() => handleEditClient(client)} className="font-medium text-brand-600 hover:text-brand-800">Editar</button>
+                                    <button onClick={() => handleDeleteClient(client.id)} className="font-medium text-rose-600 hover:text-rose-800">Excluir</button>
+                                </div>
+                            </div>
+                        ))}
+                        {clients.length === 0 && (
+                            <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-400">
+                                Nenhum cliente cadastrado.
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="hidden md:block bg-white shadow-sm border border-slate-100 rounded-xl overflow-hidden">
+                        <div className="overflow-x-auto">
+                        <table className="min-w-[720px] w-full divide-y divide-slate-100">
                             <thead className="bg-slate-50">
                                 <tr>
                                     <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase">Município</th>
@@ -326,16 +387,17 @@ export const Registrations = () => {
                                 ))}
                             </tbody>
                         </table>
+                        </div>
                     </div>
                 </div>
             )}
 
             {subTab === 'services' && (
                 <div className="space-y-4">
-                    <div className="flex justify-between items-center">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <h3 className="text-lg font-bold text-slate-800">Serviços Cadastrados</h3>
                         {!isAddingService && (
-                            <Button onClick={() => setIsAddingService(true)}>
+                            <Button onClick={() => setIsAddingService(true)} className="w-full sm:w-auto">
                                 + Novo Serviço
                             </Button>
                         )}
@@ -348,7 +410,7 @@ export const Registrations = () => {
                                 <div className="md:col-span-5">
                                     <Input label="Nome do Serviço" value={serviceForm.name} onChange={e => setServiceForm({...serviceForm, name: e.target.value})} className="mb-0 bg-white" />
                                 </div>
-                                <div className="md:col-span-3 mb-6">
+                                <div className="md:col-span-3">
                                     <label className="block text-[13px] font-semibold text-slate-600 mb-2">Segmento</label>
                                     <select 
                                         className="block w-full rounded-xl border border-slate-200 bg-white sm:text-sm py-3 px-3 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
@@ -368,7 +430,7 @@ export const Registrations = () => {
                                         onChange={e => setServiceForm({...serviceForm, description: e.target.value})}
                                     />
                                 </div>
-                                <div className="md:col-span-12 flex justify-end gap-2 mt-2">
+                                <div className="md:col-span-12 flex flex-col justify-end gap-2 mt-2 sm:flex-row">
                                     <Button variant="secondary" onClick={cancelServiceForm}>Cancelar</Button>
                                     <Button onClick={handleSaveService}>Salvar</Button>
                                 </div>
@@ -376,8 +438,34 @@ export const Registrations = () => {
                         </div>
                     )}
 
-                    <div className="bg-white shadow-sm border border-slate-100 rounded-xl overflow-hidden">
-                        <table className="min-w-full divide-y divide-slate-100">
+                    <div className="space-y-3 md:hidden">
+                        {services.map(service => (
+                            <div key={service.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <h4 className="text-sm font-bold text-slate-900">{service.name}</h4>
+                                        <p className="mt-2 text-sm leading-6 text-slate-500">{service.description}</p>
+                                    </div>
+                                    <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-700 whitespace-nowrap">
+                                        {service.segment}
+                                    </span>
+                                </div>
+                                <div className="mt-4 flex flex-wrap gap-3 text-sm">
+                                    <button onClick={() => handleEditService(service)} className="font-medium text-brand-600 hover:text-brand-800">Editar</button>
+                                    <button onClick={() => handleDeleteService(service.id)} className="font-medium text-rose-600 hover:text-rose-800">Excluir</button>
+                                </div>
+                            </div>
+                        ))}
+                        {services.length === 0 && (
+                            <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-400">
+                                Nenhum serviço cadastrado.
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="hidden md:block bg-white shadow-sm border border-slate-100 rounded-xl overflow-hidden">
+                        <div className="overflow-x-auto">
+                        <table className="min-w-[860px] w-full divide-y divide-slate-100">
                             <thead className="bg-slate-50">
                                 <tr>
                                     <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase">Nome do Serviço</th>
@@ -406,6 +494,7 @@ export const Registrations = () => {
                                 ))}
                             </tbody>
                         </table>
+                        </div>
                     </div>
                 </div>
             )}

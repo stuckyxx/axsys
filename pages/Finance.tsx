@@ -2,7 +2,12 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
+import { useAuth } from '../context/AuthContext';
+import { useTrackedStorageRefresh } from '../hooks/useTrackedStorageRefresh.ts';
 import { Expense, Income } from '../types';
+import { readCompanyScopedValue, writeCompanyScopedValue } from '../services/storageScope';
+import { PaymentProcessManager } from './Administrative';
+import { FINANCE_ACTIVE_TAB_STORAGE_KEY, getSafeFinanceTab, type FinanceTabId } from '../utils/moduleTabs.ts';
 
 // Helper para formatação monetária
 const formatCurrency = (value: number) => {
@@ -501,34 +506,64 @@ const ExpenseManager = ({ expenses, setExpenses }: { expenses: Expense[], setExp
 };
 
 export const Finance: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'income' | 'expenses' | 'dashboard'>('dashboard');
+  const { user } = useAuth();
+  const companyScopeId = user?.companyId ?? 'global';
+  const hydratedIncomeScopeRef = React.useRef<string | null>(null);
+  const hydratedExpenseScopeRef = React.useRef<string | null>(null);
+  const [activeTab, setActiveTab] = useState<FinanceTabId>(() =>
+    getSafeFinanceTab(localStorage.getItem(FINANCE_ACTIVE_TAB_STORAGE_KEY)),
+  );
   
-  const [income, setIncome] = useState<Income[]>(() => {
-      const saved = localStorage.getItem('axsys_income_db_v2');
-      if (saved) return JSON.parse(saved);
-      return [];
-  });
+  const [income, setIncome] = useState<Income[]>(() => readCompanyScopedValue('axsys_income_db_v2', [], user));
   
-  const [expenses, setExpenses] = useState<Expense[]>(() => {
-      const saved = localStorage.getItem('axsys_expense_db_v2');
-      if (saved) return JSON.parse(saved);
-      return [];
-  });
+  const [expenses, setExpenses] = useState<Expense[]>(() => readCompanyScopedValue('axsys_expense_db_v2', [], user));
 
   useEffect(() => {
-      localStorage.setItem('axsys_income_db_v2', JSON.stringify(income));
-  }, [income]);
+      hydratedIncomeScopeRef.current = null;
+      hydratedExpenseScopeRef.current = null;
+      setIncome(readCompanyScopedValue('axsys_income_db_v2', [], user));
+      setExpenses(readCompanyScopedValue('axsys_expense_db_v2', [], user));
+  }, [companyScopeId, user]);
 
   useEffect(() => {
-      localStorage.setItem('axsys_expense_db_v2', JSON.stringify(expenses));
-  }, [expenses]);
+      if (hydratedIncomeScopeRef.current !== companyScopeId) {
+          hydratedIncomeScopeRef.current = companyScopeId;
+          return;
+      }
+
+      writeCompanyScopedValue('axsys_income_db_v2', income, user);
+  }, [companyScopeId, income, user]);
+
+  useEffect(() => {
+      if (hydratedExpenseScopeRef.current !== companyScopeId) {
+          hydratedExpenseScopeRef.current = companyScopeId;
+          return;
+      }
+
+      writeCompanyScopedValue('axsys_expense_db_v2', expenses, user);
+  }, [companyScopeId, expenses, user]);
+
+  useEffect(() => {
+      localStorage.setItem(FINANCE_ACTIVE_TAB_STORAGE_KEY, activeTab);
+  }, [activeTab]);
+
+  useTrackedStorageRefresh({
+    trackedKeys: ['axsys_income_db_v2', 'axsys_expense_db_v2'],
+    user,
+    refresh: () => {
+      hydratedIncomeScopeRef.current = null;
+      hydratedExpenseScopeRef.current = null;
+      setIncome(readCompanyScopedValue('axsys_income_db_v2', [], user));
+      setExpenses(readCompanyScopedValue('axsys_expense_db_v2', [], user));
+    },
+  });
 
   return (
     <div className="max-w-7xl mx-auto space-y-8 animate-fade-in-up">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-slate-100">
         <div>
             <h1 className="text-3xl font-bold tracking-tight text-slate-900">Módulo Financeiro</h1>
-            <p className="mt-2 text-slate-500">Gestão de Fluxo de Caixa, Receitas e Despesas.</p>
+            <p className="mt-2 text-slate-500">Gestão de Fluxo de Caixa, Receitas, Despesas e Solicitações de Pagamento.</p>
         </div>
       </div>
 
@@ -538,7 +573,8 @@ export const Finance: React.FC = () => {
             {[
                 { id: 'dashboard', label: 'Painel' },
                 { id: 'income', label: 'Receitas' },
-                { id: 'expenses', label: 'Despesas' }
+                { id: 'expenses', label: 'Despesas' },
+                { id: 'payments', label: 'Solicitações de Pagamento' }
             ].map(tab => (
                 <button
                     key={tab.id}
@@ -559,6 +595,7 @@ export const Finance: React.FC = () => {
           {activeTab === 'income' && <IncomeManager income={income} setIncome={setIncome} />}
           {activeTab === 'expenses' && <ExpenseManager expenses={expenses} setExpenses={setExpenses} />}
           {activeTab === 'dashboard' && <FinancialDashboard income={income} expenses={expenses} />}
+          {activeTab === 'payments' && <PaymentProcessManager />}
       </div>
     </div>
   );

@@ -33,6 +33,8 @@ export interface BankAccount {
 export interface Company {
   id: string;
   corporateName: string;
+  publicCertificatesSlug?: string;
+  publicCertificatesShareId?: string;
   cnpj: string;
   street: string;
   number: string;
@@ -155,6 +157,14 @@ export interface Certificate {
   name: string;
   validUntil: string;
   fileUrl: string;
+  createdAt?: string;
+}
+
+export interface ContractAttachment {
+  name: string;
+  content: string;
+  mimeType: string;
+  attachedAt: string;
 }
 
 export interface Contract {
@@ -167,4 +177,7 @@ export interface Contract {
   endDate: string;
   totalValue: number;
   fileUrl: string;
+  attachment?: ContractAttachment;
+  publicShareId?: string;
+  closedAt?: string;
 }

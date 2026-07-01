@@ -10,9 +10,11 @@ import { PermissionPanel } from './pages/PermissionPanel';
 import { Administrative } from './pages/Administrative';
 import { Finance } from './pages/Finance';
 import { Certificates } from './pages/Certificates';
+import { PublicCertificates } from './pages/PublicCertificates';
 import { Settings } from './pages/Settings';
 import { SuperAdminPanel } from './pages/SuperAdminPanel';
 import { UserRole } from './types';
+import { initializeRemotePersistence } from './services/remotePersistence';
 
 const PrivateRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuth();
@@ -76,6 +78,22 @@ const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 };
 
 export default function App() {
+  const [isBootstrapping, setIsBootstrapping] = React.useState(true);
+
+  React.useEffect(() => {
+    void initializeRemotePersistence().finally(() => {
+      setIsBootstrapping(false);
+    });
+  }, []);
+
+  if (isBootstrapping) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-gray-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-600"></div>
+      </div>
+    );
+  }
+
   return (
     <AuthProvider>
       <HashRouter>
@@ -131,6 +149,7 @@ export default function App() {
           <Route path="/administrative" element={<PrivateRoute><Administrative /></PrivateRoute>} />
           <Route path="/finance" element={<PrivateRoute><Finance /></PrivateRoute>} />
           <Route path="/certificates" element={<PrivateRoute><Certificates /></PrivateRoute>} />
+          <Route path="/public/certidoes/:identifier" element={<PublicCertificates />} />
           <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
 
           <Route path="*" element={<Navigate to="/dashboard" />} />

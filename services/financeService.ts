@@ -1,54 +1,63 @@
-import { Income, Expense } from '../types';
+import type { Expense, Income, User } from '../types.ts';
+import { readCompanyScopedValue, writeCompanyScopedValue } from './storageScope.ts';
 
 const INCOME_DB_KEY = 'axsys_income_db_v2';
 const EXPENSE_DB_KEY = 'axsys_expense_db_v2';
 
-export const getIncomes = (): Income[] => {
-    const stored = localStorage.getItem(INCOME_DB_KEY);
-    if (stored) {
-        return JSON.parse(stored);
-    }
-    return [];
+export const getIncomes = (
+    user?: Pick<User, 'companyId'> | null,
+): Income[] => {
+    return readCompanyScopedValue(INCOME_DB_KEY, [], user);
 };
 
-export const saveIncome = (income: Income): void => {
-    const incomes = getIncomes();
+export const saveIncome = (
+    income: Income,
+    user?: Pick<User, 'companyId'> | null,
+): void => {
+    const incomes = getIncomes(user);
     const index = incomes.findIndex(i => i.id === income.id);
     if (index !== -1) {
         incomes[index] = income;
     } else {
         incomes.push(income);
     }
-    localStorage.setItem(INCOME_DB_KEY, JSON.stringify(incomes));
+    writeCompanyScopedValue(INCOME_DB_KEY, incomes, user);
 };
 
-export const deleteIncome = (id: string): void => {
-    const incomes = getIncomes();
+export const deleteIncome = (
+    id: string,
+    user?: Pick<User, 'companyId'> | null,
+): void => {
+    const incomes = getIncomes(user);
     const filtered = incomes.filter(i => i.id !== id);
-    localStorage.setItem(INCOME_DB_KEY, JSON.stringify(filtered));
+    writeCompanyScopedValue(INCOME_DB_KEY, filtered, user);
 };
 
-export const getExpenses = (): Expense[] => {
-    const stored = localStorage.getItem(EXPENSE_DB_KEY);
-    if (stored) {
-        return JSON.parse(stored);
-    }
-    return [];
+export const getExpenses = (
+    user?: Pick<User, 'companyId'> | null,
+): Expense[] => {
+    return readCompanyScopedValue(EXPENSE_DB_KEY, [], user);
 };
 
-export const saveExpense = (expense: Expense): void => {
-    const expenses = getExpenses();
+export const saveExpense = (
+    expense: Expense,
+    user?: Pick<User, 'companyId'> | null,
+): void => {
+    const expenses = getExpenses(user);
     const index = expenses.findIndex(e => e.id === expense.id);
     if (index !== -1) {
         expenses[index] = expense;
     } else {
         expenses.push(expense);
     }
-    localStorage.setItem(EXPENSE_DB_KEY, JSON.stringify(expenses));
+    writeCompanyScopedValue(EXPENSE_DB_KEY, expenses, user);
 };
 
-export const deleteExpense = (id: string): void => {
-    const expenses = getExpenses();
+export const deleteExpense = (
+    id: string,
+    user?: Pick<User, 'companyId'> | null,
+): void => {
+    const expenses = getExpenses(user);
     const filtered = expenses.filter(e => e.id !== id);
-    localStorage.setItem(EXPENSE_DB_KEY, JSON.stringify(filtered));
+    writeCompanyScopedValue(EXPENSE_DB_KEY, filtered, user);
 };

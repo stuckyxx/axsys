@@ -1,283 +1,507 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
-import React, { useState, useEffect } from 'react';
 import { Button } from '../components/Button';
-import { Input } from '../components/Input';
-import { Contract, Client } from '../types';
+import { ContractActionsMenu } from '../components/contracts/ContractActionsMenu';
+import { ContractAttachmentModal } from '../components/contracts/ContractAttachmentModal';
+import { ContractDetailsModal } from '../components/contracts/ContractDetailsModal';
+import { ContractFormModal } from '../components/contracts/ContractFormModal';
+import { useAuth } from '../context/AuthContext';
+import { useTrackedStorageRefresh } from '../hooks/useTrackedStorageRefresh.ts';
 import { getClients } from '../services/clientService';
+import { fileToBase64 } from '../services/companyService';
+import { writeCompanyScopedValue } from '../services/storageScope';
+import { getContracts } from '../services/contractService';
+import type { Client, Contract } from '../types.ts';
+import { FINANCE_ACTIVE_TAB_STORAGE_KEY } from '../utils/moduleTabs.ts';
+import {
+  ADMIN_PAYMENT_DRAFT_KEY,
+  ADMIN_PAYMENT_FILTER_CONTRACT_KEY,
+  filterContracts,
+  formatContractCurrency,
+  formatContractDate,
+  getContractDaysRemaining,
+  getContractProgress,
+  getContractStatus,
+  paginateContracts,
+  type ContractEntity,
+  type ContractStatus,
+} from '../utils/contracts.ts';
 
-const formatDateString = (dateString: string) => {
-    if (!dateString) return '';
-    try {
-        const [year, month, day] = dateString.split('T')[0].split('-');
-        return `${day}/${month}/${year}`;
-    } catch {
-        return dateString;
+interface ContractsProps {
+  activeTab?: string;
+}
+
+const CONTRACTS_STORAGE_KEY = 'axsys_contracts_db_v2';
+
+export const Contracts: React.FC<ContractsProps> = () => {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const hasHydratedContractsRef = React.useRef(false);
+
+  const [clients, setClients] = useState<Client[]>(() => getClients(user));
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState<ContractStatus>('Todos');
+  const [entity, setEntity] = useState<ContractEntity>('Todos');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingContract, setEditingContract] = useState<Contract | null>(null);
+  const [attachmentContract, setAttachmentContract] = useState<Contract | null>(null);
+  const [detailsContract, setDetailsContract] = useState<Contract | null>(null);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const loadContracts = React.useCallback(async () => {
+    setClients(getClients(user));
+    const storedContracts = await getContracts(user);
+    setContracts(storedContracts);
+    hasHydratedContractsRef.current = true;
+  }, [user]);
+
+  useEffect(() => {
+    if (!hasHydratedContractsRef.current) {
+      return;
     }
-};
 
-// Modal de Formulário para Contratos
-const ContractFormModal = ({ 
-    isOpen, 
-    onClose, 
-    onSave, 
-    initialData 
-}: { 
-    isOpen: boolean; 
-    onClose: () => void; 
-    onSave: (data: Partial<Contract>) => void; 
-    initialData?: Contract | null 
-}) => {
-    const [clients] = useState<Client[]>(() => getClients());
+    writeCompanyScopedValue(CONTRACTS_STORAGE_KEY, contracts, user);
+  }, [contracts, user]);
 
-    const [formData, setFormData] = useState<Partial<Contract>>(
-        initialData || {
-            clientId: '',
-            clientName: '',
-            contractNumber: '',
-            object: '',
-            startDate: '',
-            endDate: '',
-            totalValue: 0,
-            fileUrl: '#'
-        }
-    );
+  useEffect(() => {
+    let cancelled = false;
+    hasHydratedContractsRef.current = false;
+    void getContracts(user).then((storedContracts) => {
+      if (!cancelled) {
+        setClients(getClients(user));
+        setContracts(storedContracts);
+        hasHydratedContractsRef.current = true;
+      }
+    });
 
-    // Atualiza o form se mudar de edição para criação ou troca de item
-    React.useEffect(() => {
-        if (initialData) {
-            setFormData(initialData);
-        } else {
-            setFormData({ clientId: '', clientName: '', contractNumber: '', object: '', startDate: '', endDate: '', totalValue: 0, fileUrl: '#' });
-        }
-    }, [initialData, isOpen]);
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
-    if (!isOpen) return null;
-
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
-                <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                    <h3 className="font-bold text-slate-800 text-lg">
-                        {initialData ? 'Editar Contrato' : 'Novo Contrato'}
-                    </h3>
-                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">✕</button>
-                </div>
-                
-                <div className="p-6 space-y-4">
-                    <div>
-                        <label className="block text-[13px] font-semibold text-slate-600 mb-2">Cliente / Parte</label>
-                        <select 
-                            className="block w-full rounded-xl border border-slate-200 bg-white py-3 px-3 outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
-                            value={formData.clientId || ''}
-                            onChange={e => {
-                                const client = clients.find(c => c.id === e.target.value);
-                                setFormData({
-                                    ...formData, 
-                                    clientId: e.target.value,
-                                    clientName: client ? `${client.segment} Municipal de ${client.city}` : ''
-                                });
-                            }}
-                        >
-                            <option value="">Selecione um cliente...</option>
-                            {clients.map(c => (
-                                <option key={c.id} value={c.id}>{c.segment} Municipal de {c.city}</option>
-                            ))}
-                        </select>
-                    </div>
-
-                    <Input 
-                        label="Número do Contrato" 
-                        placeholder="Ex: 001/2024"
-                        value={formData.contractNumber || ''}
-                        onChange={e => setFormData({...formData, contractNumber: e.target.value})}
-                    />
-                    
-                    <Input 
-                        label="Objeto do Contrato" 
-                        placeholder="Ex: Prestação de Serviços de TI"
-                        value={formData.object}
-                        onChange={e => setFormData({...formData, object: e.target.value})}
-                    />
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <Input 
-                            label="Data Início" 
-                            type="date"
-                            value={formData.startDate}
-                            onChange={e => setFormData({...formData, startDate: e.target.value})}
-                        />
-                        <Input 
-                            label="Data Fim" 
-                            type="date"
-                            value={formData.endDate}
-                            onChange={e => setFormData({...formData, endDate: e.target.value})}
-                        />
-                    </div>
-
-                    <Input 
-                        label="Valor Total (R$)" 
-                        type="number"
-                        placeholder="0.00"
-                        value={formData.totalValue}
-                        onChange={e => setFormData({...formData, totalValue: Number(e.target.value)})}
-                    />
-                    
-                    <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 flex items-start gap-3">
-                         <div className="text-blue-500 mt-0.5">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                         </div>
-                         <p className="text-xs text-blue-800">
-                             Ao salvar, o sistema calculará automaticamente a vigência e o progresso do contrato com base nas datas.
-                         </p>
-                    </div>
-
-                    <div className="flex justify-end gap-3 pt-4">
-                        <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-                        <Button onClick={() => { onSave(formData); onClose(); }}>
-                            {initialData ? 'Salvar Alterações' : 'Criar Contrato'}
-                        </Button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-export const Contracts: React.FC = () => {
-  const [contracts, setContracts] = useState<Contract[]>(() => {
-      const saved = localStorage.getItem('axsys_contracts_db_v2');
-      if (saved) return JSON.parse(saved);
-      return [];
+  useTrackedStorageRefresh({
+    trackedKeys: ['axsys_contracts_db_v2', 'axsys_clients_db_v2'],
+    user,
+    refresh: async () => {
+      hasHydratedContractsRef.current = false;
+      await loadContracts();
+    },
   });
 
   useEffect(() => {
-      localStorage.setItem('axsys_contracts_db_v2', JSON.stringify(contracts));
-  }, [contracts]);
+    if (!toast) {
+      return;
+    }
 
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingContract, setEditingContract] = useState<Contract | null>(null);
+    const timeout = window.setTimeout(() => setToast(null), 3200);
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
+
+  const filteredContracts = useMemo(
+    () => filterContracts(contracts, { search, status, entity }),
+    [contracts, entity, search, status],
+  );
+
+  const paginatedContracts = useMemo(
+    () => paginateContracts(filteredContracts, currentPage, 6),
+    [currentPage, filteredContracts],
+  );
+
+  const showFeedback = (type: 'success' | 'error', message: string) => {
+    setToast({ type, message });
+  };
 
   const handleSave = (data: Partial<Contract>) => {
-      if (editingContract) {
-          // Edit
-          setContracts(prev => prev.map(c => c.id === editingContract.id ? { ...c, ...data } as Contract : c));
-          setEditingContract(null);
-      } else {
-          // Create
-          const newContract: Contract = {
-              ...data as Contract,
-              id: Math.random().toString(),
-              fileUrl: '#'
-          };
-          setContracts([newContract, ...contracts]);
-      }
-      setIsModalOpen(false);
+    if (editingContract) {
+      setContracts((current) =>
+        current.map((contract) => (
+          contract.id === editingContract.id ? { ...contract, ...data } as Contract : contract
+        )),
+      );
+      setEditingContract(null);
+      showFeedback('success', 'Contrato atualizado com sucesso.');
+      return;
+    }
+
+    const newContract: Contract = {
+      id: crypto.randomUUID(),
+      clientId: data.clientId ?? '',
+      clientName: data.clientName ?? '',
+      contractNumber: data.contractNumber ?? '',
+      object: data.object ?? '',
+      startDate: data.startDate ?? '',
+      endDate: data.endDate ?? '',
+      totalValue: data.totalValue ?? 0,
+      fileUrl: data.fileUrl ?? '#',
+    };
+
+    setContracts((current) => [newContract, ...current]);
+    showFeedback('success', 'Contrato criado com sucesso.');
   };
 
-  const handleEdit = (contract: Contract) => {
-      setEditingContract(contract);
-      setIsModalOpen(true);
+  const handleDelete = (contract: Contract) => {
+    if (!window.confirm(`Tem certeza que deseja excluir o contrato ${contract.contractNumber || contract.clientName}?`)) {
+      return;
+    }
+
+    setContracts((current) => current.filter((item) => item.id !== contract.id));
+    showFeedback('success', 'Contrato excluído.');
   };
 
-  const handleDelete = (id: string) => {
-      if(confirm('Tem certeza que deseja excluir este contrato?')) {
-          setContracts(prev => prev.filter(c => c.id !== id));
-      }
+  const handleSaveAttachment = async (file: File) => {
+    if (!attachmentContract) {
+      return;
+    }
+
+    try {
+      const content = await fileToBase64(file);
+
+      setContracts((current) =>
+        current.map((contract) =>
+          contract.id === attachmentContract.id
+            ? {
+                ...contract,
+                fileUrl: content,
+                attachment: {
+                  name: file.name,
+                  content,
+                  mimeType: file.type || 'application/octet-stream',
+                  attachedAt: new Date().toISOString(),
+                },
+              }
+            : contract,
+        ),
+      );
+
+      setAttachmentContract(null);
+      showFeedback('success', 'Arquivo anexado com sucesso.');
+    } catch {
+      showFeedback('error', 'Não foi possível anexar o arquivo do contrato.');
+    }
   };
 
-  const calculateProgress = (start: string, end: string) => {
-    const startDate = new Date(start + 'T00:00:00').getTime();
-    const endDate = new Date(end + 'T00:00:00').getTime();
-    const today = new Date().getTime();
-    
-    if (today < startDate) return 0;
-    if (today > endDate) return 100;
-    
-    const totalDuration = endDate - startDate;
-    const elapsed = today - startDate;
-    
-    return Math.round((elapsed / totalDuration) * 100);
+  const handleCloseContract = (contract: Contract) => {
+    if (contract.closedAt) {
+      showFeedback('error', 'Este contrato já foi encerrado.');
+      return;
+    }
+
+    if (!window.confirm(`Encerrar o contrato ${contract.contractNumber || contract.clientName}?`)) {
+      return;
+    }
+
+    setContracts((current) =>
+      current.map((item) =>
+        item.id === contract.id
+          ? {
+              ...item,
+              closedAt: new Date().toISOString(),
+            }
+          : item,
+      ),
+    );
+    showFeedback('success', 'Contrato encerrado.');
+  };
+
+  const handleGeneratePaymentRequest = (contract: Contract) => {
+    localStorage.setItem(
+      ADMIN_PAYMENT_DRAFT_KEY,
+      JSON.stringify({
+        clientId: contract.clientId,
+        contractId: contract.id,
+        description: contract.object,
+        amount: '',
+        issueDate: '',
+        invoiceNumber: '',
+      }),
+    );
+    localStorage.setItem(ADMIN_PAYMENT_FILTER_CONTRACT_KEY, contract.id);
+    localStorage.setItem(FINANCE_ACTIVE_TAB_STORAGE_KEY, 'payments');
+    navigate('/finance');
+  };
+
+  const handleViewPayments = (contract: Contract) => {
+    localStorage.setItem(ADMIN_PAYMENT_FILTER_CONTRACT_KEY, contract.id);
+    localStorage.setItem(FINANCE_ACTIVE_TAB_STORAGE_KEY, 'payments');
+    navigate('/finance');
+  };
+
+  const handleViewCertificates = () => {
+    navigate('/certificates');
+  };
+
+  const handleGeneratePublicLink = async (contract: Contract) => {
+    const shareId = contract.publicShareId ?? `contract-${crypto.randomUUID().slice(0, 8)}`;
+
+    if (!contract.publicShareId) {
+      setContracts((current) =>
+        current.map((item) =>
+          item.id === contract.id
+            ? {
+                ...item,
+                publicShareId: shareId,
+              }
+            : item,
+        ),
+      );
+    }
+
+    const publicUrl = `${window.location.origin}${window.location.pathname}#/administrative?contractShare=${shareId}`;
+
+    try {
+      await navigator.clipboard.writeText(publicUrl);
+      showFeedback('success', 'Link público copiado.');
+    } catch {
+      showFeedback('error', 'Não foi possível copiar o link público.');
+    }
+  };
+
+  const handleDownloadAttachment = (contract: Contract) => {
+    if (!contract.attachment?.content) {
+      showFeedback('error', 'Este contrato ainda não possui anexo.');
+      return;
+    }
+
+    const link = document.createElement('a');
+    link.href = contract.attachment.content;
+    link.download = contract.attachment.name || `${contract.contractNumber}.pdf`;
+    link.click();
   };
 
   return (
     <div className="space-y-8 animate-fade-in-up">
-       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`fixed right-6 top-6 z-[80] rounded-xl px-4 py-3 text-sm font-semibold text-white shadow-lg ${
+            toast.type === 'success' ? 'bg-emerald-500' : 'bg-rose-500'
+          }`}
+        >
+          {toast.message}
+        </div>
+      )}
+
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Meus Contratos</h1>
+          <p className="mt-1 text-sm text-gray-500">Acompanhe a vigência, anexos e ações operacionais dos contratos.</p>
+        </div>
+        <Button onClick={() => { setEditingContract(null); setIsModalOpen(true); }}>
+          + Novo Contrato
+        </Button>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-              <h1 className="text-2xl font-bold text-gray-900">Meus Contratos</h1>
-              <p className="mt-1 text-sm text-gray-500">Acompanhe a vigência e execução dos contratos.</p>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Buscar</label>
+            <input
+              type="text"
+              placeholder="Buscar contratos..."
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setCurrentPage(1);
+              }}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
+            />
           </div>
-          <Button onClick={() => { setEditingContract(null); setIsModalOpen(true); }}>
-              + Novo Contrato
-          </Button>
-       </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Status</label>
+            <select
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value as ContractStatus);
+                setCurrentPage(1);
+              }}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
+            >
+              {['Todos', 'Ativo', 'A vencer', 'Vencido', 'Encerrado'].map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Órgão</label>
+            <select
+              value={entity}
+              onChange={(event) => {
+                setEntity(event.target.value as ContractEntity);
+                setCurrentPage(1);
+              }}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
+            >
+              {['Todos', 'Prefeitura', 'Câmara', 'Empresa'].map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
 
-       <div className="grid grid-cols-1 gap-6">
-          {contracts.length === 0 && (
-              <div className="text-center py-12 bg-white rounded-xl border border-dashed border-gray-300 text-gray-400">
-                  Nenhum contrato cadastrado.
-              </div>
-          )}
-          {contracts.map(contract => {
-              const progress = calculateProgress(contract.startDate, contract.endDate);
-              const daysLeft = Math.ceil((new Date(contract.endDate + 'T00:00:00').getTime() - new Date().getTime()) / (1000 * 3600 * 24));
+      <div className="grid grid-cols-1 gap-6">
+        {paginatedContracts.items.length === 0 && (
+          <div className="text-center py-12 bg-white rounded-xl border border-dashed border-gray-300 text-gray-400">
+            Nenhum contrato encontrado.
+          </div>
+        )}
 
-              return (
-                  <div key={contract.id} className="bg-white border border-gray-200 shadow-sm rounded-xl p-6 hover:shadow-md transition-all group">
-                      <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4">
-                          <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-1">
-                                <h3 className="text-lg font-bold text-gray-900">{contract.clientName}</h3>
-                                {contract.contractNumber && <span className="px-2 py-0.5 rounded text-xs bg-brand-50 text-brand-700 font-semibold border border-brand-100">Nº {contract.contractNumber}</span>}
-                                {progress >= 100 && <span className="px-2 py-0.5 rounded text-[10px] bg-gray-100 text-gray-600 font-bold uppercase">Finalizado</span>}
-                                {progress < 100 && <span className="px-2 py-0.5 rounded text-[10px] bg-green-100 text-green-700 font-bold uppercase">Ativo</span>}
-                              </div>
-                              <p className="text-sm text-gray-500 font-medium">{contract.object}</p>
-                          </div>
-                          <div className="text-right">
-                              <p className="text-xl font-bold text-slate-800">R$ {contract.totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
-                          </div>
-                      </div>
+        {paginatedContracts.items.map((contract) => {
+          const progress = getContractProgress(contract);
+          const daysLeft = getContractDaysRemaining(contract);
+          const contractStatus = getContractStatus(contract);
 
-                      <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-                          <div>
-                            <div className="flex justify-between text-xs font-semibold text-gray-500 mb-2">
-                                <span>{formatDateString(contract.startDate)}</span>
-                                <span>{formatDateString(contract.endDate)}</span>
-                            </div>
-                            <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
-                                <div 
-                                    className={`h-3 rounded-full transition-all duration-500 ${progress >= 90 ? 'bg-red-500' : progress >= 50 ? 'bg-brand-500' : 'bg-emerald-500'}`} 
-                                    style={{ width: `${progress}%` }}
-                                ></div>
-                            </div>
-                            <div className="flex justify-between mt-2 text-xs font-medium">
-                                <span className={progress >= 90 ? 'text-red-600' : 'text-gray-500'}>{progress}% Decorrido</span>
-                                <span className={daysLeft < 30 ? 'text-red-600' : 'text-emerald-600'}>
-                                    {daysLeft > 0 ? `${daysLeft} dias restantes` : 'Vigência encerrada'}
-                                </span>
-                            </div>
-                          </div>
-                          
-                          <div className="flex justify-end gap-2 border-t md:border-t-0 pt-4 md:pt-0 border-gray-100">
-                             <Button variant="secondary" className="text-xs" onClick={() => handleEdit(contract)}>
-                                 Editar
-                             </Button>
-                             <Button variant="ghost" className="text-xs text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => handleDelete(contract.id)}>
-                                 Excluir
-                             </Button>
-                          </div>
-                      </div>
+          return (
+            <div key={contract.id} className="bg-white border border-gray-200 shadow-sm rounded-xl p-6 hover:shadow-md transition-all">
+              <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4">
+                <div className="flex-1">
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <h3 className="text-lg font-bold text-gray-900">{contract.clientName}</h3>
+                    {contract.contractNumber && (
+                      <span className="px-2 py-0.5 rounded text-xs bg-brand-50 text-brand-700 font-semibold border border-brand-100">
+                        Nº {contract.contractNumber}
+                      </span>
+                    )}
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                      contractStatus === 'Ativo'
+                        ? 'bg-green-100 text-green-700'
+                        : contractStatus === 'A vencer'
+                          ? 'bg-yellow-100 text-yellow-800'
+                          : contractStatus === 'Vencido'
+                            ? 'bg-red-100 text-red-700'
+                            : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {contractStatus}
+                    </span>
                   </div>
-              );
-          })}
-       </div>
+                  <p className="text-sm text-gray-500 font-medium">{contract.object}</p>
+                </div>
 
-       <ContractFormModal 
-          isOpen={isModalOpen}
-          onClose={() => setIsModalOpen(false)}
-          onSave={handleSave}
-          initialData={editingContract}
-       />
+                <div className="text-right">
+                  <p className="text-xl font-bold text-slate-800">{formatContractCurrency(contract.totalValue)}</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {formatContractDate(contract.startDate)} até {formatContractDate(contract.endDate)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-6 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-6 items-center">
+                <div>
+                  <div className="flex justify-between text-xs font-semibold text-gray-500 mb-2">
+                    <span>{formatContractDate(contract.startDate)}</span>
+                    <span>{formatContractDate(contract.endDate)}</span>
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
+                    <div
+                      className={`h-3 rounded-full transition-all duration-500 ${
+                        contractStatus === 'Vencido'
+                          ? 'bg-red-500'
+                          : contractStatus === 'A vencer'
+                            ? 'bg-yellow-500'
+                            : contractStatus === 'Encerrado'
+                              ? 'bg-slate-400'
+                              : 'bg-emerald-500'
+                      }`}
+                      style={{ width: `${progress}%` }}
+                    ></div>
+                  </div>
+                  <div className="flex justify-between mt-2 text-xs font-medium">
+                    <span className="text-gray-500">{progress}% decorrido</span>
+                    <span className={daysLeft < 30 ? 'text-red-600' : 'text-emerald-600'}>
+                      {contractStatus === 'Encerrado'
+                        ? 'Contrato encerrado'
+                        : daysLeft > 0
+                          ? `${daysLeft} dias restantes`
+                          : 'Vigência encerrada'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 border-t md:border-t-0 pt-4 md:pt-0 border-gray-100">
+                  <Button variant="secondary" className="text-xs" onClick={() => { setEditingContract(contract); setIsModalOpen(true); }}>
+                    Editar
+                  </Button>
+                  <Button variant="ghost" className="text-xs text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => handleDelete(contract)}>
+                    Excluir
+                  </Button>
+                  <ContractActionsMenu
+                    canClose={!contract.closedAt}
+                    onAttach={() => setAttachmentContract(contract)}
+                    onCloseContract={() => handleCloseContract(contract)}
+                    onDownload={() => handleDownloadAttachment(contract)}
+                    onGeneratePaymentRequest={() => handleGeneratePaymentRequest(contract)}
+                    onGeneratePublicLink={() => void handleGeneratePublicLink(contract)}
+                    onViewCertificates={handleViewCertificates}
+                    onViewDetails={() => setDetailsContract(contract)}
+                    onViewPayments={() => handleViewPayments(contract)}
+                  />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {paginatedContracts.totalPages > 1 && (
+        <div className="flex flex-col md:flex-row items-center justify-between gap-4 text-sm">
+          <p className="text-slate-500">
+            Exibindo {paginatedContracts.items.length} de {paginatedContracts.totalItems} contratos
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+              disabled={paginatedContracts.page === 1}
+            >
+              Anterior
+            </Button>
+            <span className="px-3 py-2 text-slate-600">
+              Página {paginatedContracts.page} de {paginatedContracts.totalPages}
+            </span>
+            <Button
+              variant="secondary"
+              onClick={() => setCurrentPage((page) => Math.min(paginatedContracts.totalPages, page + 1))}
+              disabled={paginatedContracts.page === paginatedContracts.totalPages}
+            >
+              Próxima
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <ContractFormModal
+        clients={clients}
+        contract={editingContract}
+        isOpen={isModalOpen}
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingContract(null);
+        }}
+        onSave={handleSave}
+      />
+
+      <ContractAttachmentModal
+        existingAttachmentName={attachmentContract?.attachment?.name}
+        isOpen={Boolean(attachmentContract)}
+        onClose={() => setAttachmentContract(null)}
+        onSave={handleSaveAttachment}
+        title={attachmentContract?.contractNumber || attachmentContract?.clientName || 'Anexar contrato'}
+      />
+
+      <ContractDetailsModal
+        contract={detailsContract}
+        isOpen={Boolean(detailsContract)}
+        onClose={() => setDetailsContract(null)}
+        statusLabel={detailsContract ? getContractStatus(detailsContract) : ''}
+      />
     </div>
   );
 };

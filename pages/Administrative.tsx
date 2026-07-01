@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 import { Button } from '../components/Button';
+import { AdministrativeTabId } from '../components/contracts/AdministrativeTabs';
 import { Proposals } from './Proposals';
 import { Contracts } from './Contracts';
 import { Registrations } from '../components/Registrations';
@@ -11,6 +12,18 @@ import { getCompanySettings, fileToBase64, getCompanyById } from '../services/co
 import { saveIncome, saveExpense } from '../services/financeService';
 import { Company } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { useTrackedStorageRefresh } from '../hooks/useTrackedStorageRefresh.ts';
+import { ADMIN_PAYMENT_DRAFT_KEY, ADMIN_PAYMENT_FILTER_CONTRACT_KEY } from '../utils/contracts.ts';
+import { readCompanyScopedValue, writeCompanyScopedValue } from '../services/storageScope';
+import { ADMIN_ACTIVE_TAB_STORAGE_KEY, getSafeAdministrativeTab } from '../utils/moduleTabs.ts';
+import {
+    getPaymentReportPrintLabel,
+    getPaymentReportSections,
+    getPaymentReportTitle,
+    type PaymentReportMode,
+} from '../utils/paymentReport.ts';
+import { evaluatePaymentRequestCertificates } from '../utils/paymentFormalization.ts';
+import { buildCertificateCollections } from '../utils/certificateHistory.ts';
 
 // --- Componente de Aviso de Certidões ---
 const CertificateWarningModal = ({ expiredCertificates, missingCertificates, onClose, onProceed }: { expiredCertificates: Certificate[], missingCertificates: string[], onClose: () => void, onProceed: () => void }) => {
@@ -79,20 +92,91 @@ const CertificateWarningModal = ({ expiredCertificates, missingCertificates, onC
     );
 };
 
+const PaymentReportChoiceModal = ({
+    request,
+    onClose,
+    onSelect,
+}: {
+    request: PaymentRequest;
+    onClose: () => void;
+    onSelect: (mode: PaymentReportMode) => void;
+}) => {
+    return (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <div className="w-full max-w-2xl rounded-2xl bg-white shadow-2xl overflow-hidden">
+                <div className="border-b border-slate-100 bg-slate-50 px-6 py-5 flex items-center justify-between">
+                    <div>
+                        <h3 className="text-lg font-bold text-slate-900">Escolha o tipo de relatório</h3>
+                        <p className="mt-1 text-sm text-slate-500">
+                            Solicitação {request.invoiceNumber ? `da NF ${request.invoiceNumber}` : 'de pagamento'}.
+                        </p>
+                    </div>
+                    <Button variant="ghost" onClick={onClose}>Fechar</Button>
+                </div>
+
+                <div className="p-6">
+                    <div className="grid gap-4 md:grid-cols-2">
+                        <button
+                            type="button"
+                            onClick={() => onSelect('complete')}
+                            className="rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                        >
+                            <p className="text-sm font-bold uppercase tracking-[0.18em] text-slate-400">Processo completo</p>
+                            <h4 className="mt-3 text-lg font-bold text-slate-900">Carta, nota fiscal e certidões</h4>
+                            <p className="mt-2 text-sm leading-6 text-slate-500">
+                                Gera o pacote inteiro como hoje, incluindo a solicitação, o arquivo da nota e todas as certidões anexadas.
+                            </p>
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => onSelect('request_only')}
+                            className="rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                        >
+                            <p className="text-sm font-bold uppercase tracking-[0.18em] text-slate-400">Somente solicitação</p>
+                            <h4 className="mt-3 text-lg font-bold text-slate-900">Carta e arquivo da solicitação</h4>
+                            <p className="mt-2 text-sm leading-6 text-slate-500">
+                                Gera uma versão própria da solicitação com a carta e a nota fiscal, sem incluir as páginas de certidões.
+                            </p>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // --- Visualização do Processo Unificado (Simulado) ---
-const PaymentDocumentPreview = ({ request, onClose, warnings, contracts }: { request: PaymentRequest; onClose: () => void, warnings: boolean, contracts: Contract[] }) => {
+const PaymentDocumentPreview = ({
+    request,
+    onClose,
+    warnings,
+    contracts,
+    initialMode,
+}: {
+    request: PaymentRequest;
+    onClose: () => void;
+    warnings: boolean;
+    contracts: Contract[];
+    initialMode: PaymentReportMode;
+}) => {
     const printRef = useRef<HTMLDivElement>(null);
     const { user } = useAuth();
+    const [reportMode, setReportMode] = useState<PaymentReportMode>(initialMode);
     
     const [realCertificates, setRealCertificates] = useState<Certificate[]>([]);
     
     useEffect(() => {
         const loadCerts = async () => {
-            const certs = await getCertificates();
-            setRealCertificates(certs);
+            const certs = await getCertificates(user, { preferRemote: true });
+            setRealCertificates(buildCertificateCollections(certs).relevant);
         };
-        loadCerts();
-    }, []);
+        void loadCerts();
+    }, [user]);
+
+    useEffect(() => {
+        setReportMode(initialMode);
+    }, [initialMode]);
 
     const [companySettings] = useState<Company>(() => {
         if (user?.companyId) {
@@ -120,7 +204,7 @@ const PaymentDocumentPreview = ({ request, onClose, warnings, contracts }: { req
             <!DOCTYPE html>
             <html>
                 <head>
-                    <title>Impressão - Processo</title>
+                    <title>${getPaymentReportTitle(reportMode)}</title>
                     ${styles}
                     <style>
                         @page { size: A4; margin: 0; }
@@ -165,6 +249,8 @@ const PaymentDocumentPreview = ({ request, onClose, warnings, contracts }: { req
     const city = companySettings.city || 'São Luís';
     const state = companySettings.state || 'MA';
     const fullDate = `${city} - ${state}, ${day} de ${monthFormatted} de ${year}.`;
+    const visibleSections = getPaymentReportSections(reportMode);
+    const showCertificates = visibleSections.includes('certificates');
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">
@@ -177,7 +263,7 @@ const PaymentDocumentPreview = ({ request, onClose, warnings, contracts }: { req
                             ) : (
                                 <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                             )}
-                            Processo Formalizado (Visualização Unificada)
+                            {getPaymentReportTitle(reportMode)}
                         </h3>
                         {warnings ? (
                              <p className="text-xs text-yellow-600 font-semibold mt-1">⚠ Gerado com ressalvas (Certidões Pendentes)</p>
@@ -185,11 +271,35 @@ const PaymentDocumentPreview = ({ request, onClose, warnings, contracts }: { req
                              <p className="text-xs text-green-600 font-semibold mt-1">✓ Certidões Válidas Checadas e Anexadas</p>
                         )}
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap justify-end gap-2">
+                        <div className="flex rounded-lg border border-slate-200 bg-white p-1">
+                            <button
+                                type="button"
+                                onClick={() => setReportMode('request_only')}
+                                className={`rounded-md px-3 py-2 text-sm font-semibold transition-colors ${
+                                    reportMode === 'request_only'
+                                        ? 'bg-brand-600 text-white shadow-sm'
+                                        : 'text-slate-600 hover:bg-slate-100'
+                                }`}
+                            >
+                                Somente Solicitação
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setReportMode('complete')}
+                                className={`rounded-md px-3 py-2 text-sm font-semibold transition-colors ${
+                                    reportMode === 'complete'
+                                        ? 'bg-brand-600 text-white shadow-sm'
+                                        : 'text-slate-600 hover:bg-slate-100'
+                                }`}
+                            >
+                                Processo Completo
+                            </button>
+                        </div>
                         <Button variant="ghost" onClick={onClose}>Fechar</Button>
                         <Button onClick={handlePrint}>
                             <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                            Baixar Processo Completo
+                            {getPaymentReportPrintLabel(reportMode)}
                         </Button>
                     </div>
                 </div>
@@ -233,7 +343,7 @@ const PaymentDocumentPreview = ({ request, onClose, warnings, contracts }: { req
                                 {/* Destinatário */}
                                 <div className="mb-8 font-bold text-left">
                                     <p className="uppercase">À</p>
-                                    <p>{request.takerName || "Câmara Municipal de Barão do Grajáu"}</p>
+                                    <p>{request.takerName || "Tomador não identificado"}</p>
                                 </div>
 
                                 {/* Referência */}
@@ -327,32 +437,34 @@ const PaymentDocumentPreview = ({ request, onClose, warnings, contracts }: { req
                         </div>
 
                         {/* --- PÁGINAS 3+: CERTIDÕES --- */}
-                        {realCertificates.length > 0 ? (
-                            realCertificates.map((cert) => (
-                                <div key={cert.id} className="relative min-h-[297mm] flex flex-col page-break-after-always bg-white">
-                                    <div className="flex-1 flex flex-col items-center justify-center w-full h-full">
-                                        {cert.fileUrl ? (
-                                            cert.fileUrl.startsWith('data:application/pdf') ? (
-                                                <embed src={cert.fileUrl} type="application/pdf" className="w-full h-[297mm]" />
+                        {showCertificates && (
+                            realCertificates.length > 0 ? (
+                                realCertificates.map((cert) => (
+                                    <div key={cert.id} className="relative min-h-[297mm] flex flex-col page-break-after-always bg-white">
+                                        <div className="flex-1 flex flex-col items-center justify-center w-full h-full">
+                                            {cert.fileUrl ? (
+                                                cert.fileUrl.startsWith('data:application/pdf') ? (
+                                                    <embed src={cert.fileUrl} type="application/pdf" className="w-full h-[297mm]" />
+                                                ) : (
+                                                    <img src={cert.fileUrl} alt={cert.name} className="w-full h-[297mm] object-contain" />
+                                                )
                                             ) : (
-                                                <img src={cert.fileUrl} alt={cert.name} className="w-full h-[297mm] object-contain" />
-                                            )
-                                        ) : (
-                                            <div className="text-center p-12 bg-slate-50 rounded-xl w-full h-full flex items-center justify-center flex-col">
-                                                <h3 className="text-xl font-bold text-slate-400 mb-4 uppercase tracking-widest">{cert.name}</h3>
-                                                <p className="text-slate-500">Imagem da certidão não disponível.</p>
-                                            </div>
-                                        )}
+                                                <div className="text-center p-12 bg-slate-50 rounded-xl w-full h-full flex items-center justify-center flex-col">
+                                                    <h3 className="text-xl font-bold text-slate-400 mb-4 uppercase tracking-widest">{cert.name}</h3>
+                                                    <p className="text-slate-500">Imagem da certidão não disponível.</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="relative min-h-[297mm] flex flex-col p-8 page-break-after-always bg-white">
+                                    <div className="flex-1 flex flex-col items-center justify-center border-2 border-slate-200 border-dashed rounded-xl p-4">
+                                        <h3 className="text-xl font-bold text-slate-400 mb-4 uppercase tracking-widest">Certidões</h3>
+                                        <p className="text-slate-500">Nenhuma certidão anexada.</p>
                                     </div>
                                 </div>
-                            ))
-                        ) : (
-                            <div className="relative min-h-[297mm] flex flex-col p-8 page-break-after-always bg-white">
-                                <div className="flex-1 flex flex-col items-center justify-center border-2 border-slate-200 border-dashed rounded-xl p-4">
-                                    <h3 className="text-xl font-bold text-slate-400 mb-4 uppercase tracking-widest">Certidões</h3>
-                                    <p className="text-slate-500">Nenhuma certidão anexada.</p>
-                                </div>
-                            </div>
+                            )
                         )}
 
                     </div>
@@ -371,46 +483,11 @@ const PaymentDocumentPreview = ({ request, onClose, warnings, contracts }: { req
 
 // --- Gerenciador de Processos de Pagamento ---
 
-const PaymentProcessManager = () => {
-    const [requests, setRequests] = useState<PaymentRequest[]>(() => {
-        const saved = localStorage.getItem('axsys_payment_requests_v2');
-        if (saved) return JSON.parse(saved);
-        return [];
-    });
-    const [contracts] = useState<Contract[]>(() => {
-        const saved = localStorage.getItem('axsys_contracts_db_v2');
-        if (saved) return JSON.parse(saved);
-        return [];
-    });
-    const [clients] = useState<Client[]>(() => {
-        const saved = localStorage.getItem('axsys_clients_db_v2');
-        if (saved) return JSON.parse(saved);
-        return [];
-    });
-
-    const [isProcessingUpload, setIsProcessingUpload] = useState(false);
-    const [isFormalizing, setIsFormalizing] = useState(false);
-    
-    // Filters
-    const [filterContract, setFilterContract] = useState('');
-    const [filterEntity, setFilterEntity] = useState('');
-    const [filterClient, setFilterClient] = useState('');
-
-    useEffect(() => {
-        localStorage.setItem('axsys_payment_requests_v2', JSON.stringify(requests));
-    }, [requests]);
-
-    // Edit state
-    const [editingRequest, setEditingRequest] = useState<PaymentRequest | null>(null);
-
-    // States para Modais
-    const [selectedRequest, setSelectedRequest] = useState<PaymentRequest | null>(null);
-    const [pendingRequest, setPendingRequest] = useState<PaymentRequest | null>(null); 
-    const [expiredCerts, setExpiredCerts] = useState<Certificate[]>([]);
-    const [missingCerts, setMissingCerts] = useState<string[]>([]);
-    
-    const [isNewRequestModalOpen, setIsNewRequestModalOpen] = useState(false);
-    const [newRequestForm, setNewRequestForm] = useState({
+export const PaymentProcessManager = () => {
+    const { user } = useAuth();
+    const companyScopeId = user?.companyId ?? 'global';
+    const hydratedRequestsScopeRef = useRef<string | null>(null);
+    const emptyRequestForm = {
         clientId: '',
         contractId: '',
         invoiceNumber: '',
@@ -419,7 +496,110 @@ const PaymentProcessManager = () => {
         issueDate: '',
         invoiceFileContent: '',
         invoiceFileName: ''
+    };
+    const loadRequests = () => readCompanyScopedValue<PaymentRequest[]>('axsys_payment_requests_v2', [], user);
+    const loadContracts = () => readCompanyScopedValue<Contract[]>('axsys_contracts_db_v2', [], user);
+    const loadClients = () => readCompanyScopedValue<Client[]>('axsys_clients_db_v2', [], user);
+    const normalizeDateInputValue = (value: string) => {
+        if (!value) return '';
+        if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+
+        const slashMatch = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (slashMatch) {
+            const [, day, month, year] = slashMatch;
+            return `${year}-${month}-${day}`;
+        }
+
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) {
+            return '';
+        }
+
+        return parsed.toISOString().split('T')[0];
+    };
+
+    const [requests, setRequests] = useState<PaymentRequest[]>(loadRequests);
+    const [contracts, setContracts] = useState<Contract[]>(loadContracts);
+    const [clients, setClients] = useState<Client[]>(loadClients);
+
+    const [isProcessingUpload, setIsProcessingUpload] = useState(false);
+    const [isFormalizing, setIsFormalizing] = useState(false);
+    
+    // Filters
+    const [filterContract, setFilterContract] = useState(() => localStorage.getItem(ADMIN_PAYMENT_FILTER_CONTRACT_KEY) || '');
+    const [filterEntity, setFilterEntity] = useState('');
+    const [filterClient, setFilterClient] = useState('');
+
+    // Edit state
+    const [editingRequest, setEditingRequest] = useState<PaymentRequest | null>(null);
+
+    // States para Modais
+    const [selectedRequest, setSelectedRequest] = useState<PaymentRequest | null>(null);
+    const [selectedReportMode, setSelectedReportMode] = useState<PaymentReportMode>('complete');
+    const [reportChoiceRequest, setReportChoiceRequest] = useState<PaymentRequest | null>(null);
+    const [pendingRequest, setPendingRequest] = useState<PaymentRequest | null>(null); 
+    const [expiredCerts, setExpiredCerts] = useState<Certificate[]>([]);
+    const [missingCerts, setMissingCerts] = useState<string[]>([]);
+    
+    const [isNewRequestModalOpen, setIsNewRequestModalOpen] = useState(() => Boolean(localStorage.getItem(ADMIN_PAYMENT_DRAFT_KEY)));
+    const [newRequestForm, setNewRequestForm] = useState(() => {
+        const draft = localStorage.getItem(ADMIN_PAYMENT_DRAFT_KEY);
+        if (!draft) {
+            return emptyRequestForm;
+        }
+
+        try {
+            return { ...emptyRequestForm, ...JSON.parse(draft) };
+        } catch {
+            return emptyRequestForm;
+        }
     });
+
+    const refreshManagerState = React.useCallback(() => {
+        hydratedRequestsScopeRef.current = null;
+        setContracts(loadContracts());
+        setClients(loadClients());
+        setRequests(loadRequests());
+    }, [user]);
+
+    useEffect(() => {
+        refreshManagerState();
+    }, [companyScopeId, refreshManagerState]);
+
+    useEffect(() => {
+        if (hydratedRequestsScopeRef.current !== companyScopeId) {
+            hydratedRequestsScopeRef.current = companyScopeId;
+            return;
+        }
+
+        writeCompanyScopedValue('axsys_payment_requests_v2', requests, user);
+    }, [companyScopeId, requests, user]);
+
+    useTrackedStorageRefresh({
+        trackedKeys: [
+            'axsys_payment_requests_v2',
+            'axsys_contracts_db_v2',
+            'axsys_clients_db_v2',
+        ],
+        user,
+        refresh: () => {
+            refreshManagerState();
+        },
+    });
+
+    useEffect(() => {
+        if (!isNewRequestModalOpen) {
+            return;
+        }
+
+        const hasDraftContent = Object.values(newRequestForm).some(Boolean);
+        if (!hasDraftContent) {
+            localStorage.removeItem(ADMIN_PAYMENT_DRAFT_KEY);
+            return;
+        }
+
+        localStorage.setItem(ADMIN_PAYMENT_DRAFT_KEY, JSON.stringify(newRequestForm));
+    }, [isNewRequestModalOpen, newRequestForm]);
 
     const handleAIUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if(e.target.files && e.target.files[0]) {
@@ -496,16 +676,16 @@ const PaymentProcessManager = () => {
                     }
                 }
 
-                setNewRequestForm({
-                    ...newRequestForm,
+                setNewRequestForm(prev => ({
+                    ...prev,
                     clientId: matchedClientId,
                     invoiceNumber: extractedData.invoiceNumber || '',
                     amount: extractedData.amount ? extractedData.amount.toString() : '',
                     description: extractedData.description || '',
-                    issueDate: extractedData.issueDate || '',
+                    issueDate: normalizeDateInputValue(extractedData.issueDate || ''),
                     invoiceFileContent: base64File,
                     invoiceFileName: file.name
-                });
+                }));
                 
                 setIsProcessingUpload(false);
             } catch (error) {
@@ -518,7 +698,7 @@ const PaymentProcessManager = () => {
 
     const handleNewRequestSubmit = () => {
         const selectedClient = clients.find(c => c.id === newRequestForm.clientId);
-        const takerName = selectedClient ? `${selectedClient.segment} de ${selectedClient.city}` : 'Câmara Municipal de Barão de Grajaú';
+        const takerName = selectedClient ? `${selectedClient.segment} de ${selectedClient.city}` : 'Tomador não identificado';
 
         const newReq: PaymentRequest = {
             id: crypto.randomUUID(),
@@ -536,68 +716,68 @@ const PaymentProcessManager = () => {
             status: 'pending',
             createdAt: new Date().toISOString()
         };
-        setRequests([newReq, ...requests]);
+        setRequests(current => [newReq, ...current]);
         setIsNewRequestModalOpen(false);
-        setNewRequestForm({ clientId: '', contractId: '', invoiceNumber: '', amount: '', description: '', issueDate: '', invoiceFileContent: '', invoiceFileName: '' });
+        setNewRequestForm(emptyRequestForm);
+        localStorage.removeItem(ADMIN_PAYMENT_DRAFT_KEY);
     };
 
     const handleFormalizeProcess = async (req: PaymentRequest) => {
         setIsFormalizing(true);
 
-        // 2. Buscar Certidões REAIS
-        const currentCertificates = await getCertificates();
-        
-        // 1. Simular delay
-        setTimeout(() => {
-            const today = new Date();
-            today.setHours(0,0,0,0);
-
-            // Verificar Vencidas
-            const expired = currentCertificates.filter(c => {
-                 const validDate = new Date(c.validUntil);
-                 validDate.setHours(23,59,59,999);
-                 return validDate < today;
-            });
-
-            // Verificar Faltantes
-            const missing = REQUIRED_CERTIFICATE_TYPES.filter(type => 
-                !currentCertificates.some(c => c.name === type)
-            );
-
+        try {
+            const currentCertificates = await getCertificates(user, { preferRemote: true });
+            const { expiredCertificates, missingCertificates } = evaluatePaymentRequestCertificates(currentCertificates);
             setIsFormalizing(false);
 
-            if (expired.length > 0 || missing.length > 0) {
+            if (expiredCertificates.length > 0 || missingCertificates.length > 0) {
                 // AVISO, MAS PERMITE CONTINUAR
-                setExpiredCerts(expired);
-                setMissingCerts(missing);
+                setExpiredCerts(expiredCertificates);
+                setMissingCerts(missingCertificates);
                 setPendingRequest(req);
             } else {
                 // SUCESSO DIRETO
                 const updatedReq = { ...req, status: 'formalized' as const };
-                setRequests(requests.map(r => r.id === req.id ? updatedReq : r));
-                setSelectedRequest(updatedReq);
+                setRequests(current => current.map(r => r.id === req.id ? updatedReq : r));
+                setReportChoiceRequest(updatedReq);
             }
-        }, 1500);
+        } catch (error) {
+            console.error('Erro ao formalizar processo de pagamento', error);
+            setIsFormalizing(false);
+            alert('Não foi possível validar as certidões agora. Tente novamente.');
+        }
     };
 
     const confirmForcedGeneration = () => {
         if (pendingRequest) {
             const updatedReq = { ...pendingRequest, status: 'formalized' as const };
-            setRequests(requests.map(r => r.id === pendingRequest.id ? updatedReq : r));
-            setSelectedRequest(updatedReq);
+            setRequests(current => current.map(r => r.id === pendingRequest.id ? updatedReq : r));
+            setReportChoiceRequest(updatedReq);
             setExpiredCerts([]);
             setMissingCerts([]);
             setPendingRequest(null);
         }
     };
 
+    const handleOpenReportPreview = (mode: PaymentReportMode) => {
+        if (!reportChoiceRequest) {
+            return;
+        }
+
+        setSelectedReportMode(mode);
+        setSelectedRequest(reportChoiceRequest);
+        setReportChoiceRequest(null);
+    };
+
     const handleMarkAsPaid = (req: PaymentRequest) => {
         // 1. Update status
         const updatedReq = { ...req, status: 'paid' as const };
-        setRequests(requests.map(r => r.id === req.id ? updatedReq : r));
+        setRequests(current => current.map(r => r.id === req.id ? updatedReq : r));
 
         // 2. Calculate tax
-        const company = getCompanySettings();
+        const company = user?.companyId
+            ? getCompanyById(user.companyId) || getCompanySettings()
+            : getCompanySettings();
         const taxRate = company.taxRate || 0;
         const taxAmount = req.amount * (taxRate / 100);
 
@@ -610,7 +790,7 @@ const PaymentProcessManager = () => {
             origin: 'payment_request',
             paymentRequestId: req.id,
             category: 'Serviços'
-        });
+        }, user);
 
         // 4. Create Expense (Tax - Marcado como não pago)
         if (taxAmount > 0) {
@@ -622,7 +802,7 @@ const PaymentProcessManager = () => {
                 type: 'variable',
                 category: 'Impostos',
                 isPaid: false
-            });
+            }, user);
         }
         
         alert('Pagamento informado com sucesso! Receita e imposto gerados no módulo financeiro.');
@@ -630,13 +810,13 @@ const PaymentProcessManager = () => {
 
     const handleDeleteRequest = (id: string) => {
         if (confirm('Tem certeza que deseja excluir esta solicitação?')) {
-            setRequests(requests.filter(req => req.id !== id));
+            setRequests(current => current.filter(req => req.id !== id));
         }
     };
 
     const handleSaveEdit = () => {
         if (editingRequest) {
-            setRequests(requests.map(req => req.id === editingRequest.id ? editingRequest : req));
+            setRequests(current => current.map(req => req.id === editingRequest.id ? editingRequest : req));
             setEditingRequest(null);
         }
     };
@@ -646,9 +826,7 @@ const PaymentProcessManager = () => {
         
         if (filterEntity || filterClient) {
             const contract = contracts.find(c => c.id === req.contractId);
-            if (!contract) return false;
-            
-            const client = clients.find(c => c.id === contract.clientId);
+            const client = clients.find(c => c.id === (req.clientId || contract?.clientId));
             if (!client) return false;
 
             if (filterEntity && client.segment !== filterEntity) return false;
@@ -725,7 +903,8 @@ const PaymentProcessManager = () => {
             </div>
 
             <div className="bg-white shadow-sm border border-slate-100 rounded-2xl overflow-hidden">
-                <table className="min-w-full divide-y divide-slate-100">
+                <div className="overflow-x-auto">
+                <table className="min-w-[980px] w-full divide-y divide-slate-100">
                     <thead className="bg-slate-50/50">
                         <tr>
                             <th className="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Documento Base</th>
@@ -785,13 +964,14 @@ const PaymentProcessManager = () => {
                                                     const selectedClient = selectedContract ? clients.find(c => c.id === selectedContract.clientId) : null;
                                                     
                                                     let newTakerName = editingRequest.takerName;
-                                                    if (selectedClient && (!newTakerName || newTakerName === 'Câmara Municipal de Barão do Grajáu')) {
+                                                    if (selectedClient && (!newTakerName || newTakerName === 'Tomador não identificado')) {
                                                         newTakerName = `${selectedClient.segment} de ${selectedClient.city}`;
                                                     }
                                                     
                                                     setEditingRequest({
                                                         ...editingRequest, 
                                                         contractId: newContractId,
+                                                        clientId: selectedClient?.id,
                                                         takerName: newTakerName
                                                     });
                                                 }}
@@ -893,6 +1073,15 @@ const PaymentProcessManager = () => {
                                                     Formalizar Processo
                                                 </Button>
                                             ) : null}
+                                            {(req.status === 'formalized' || req.status === 'paid') && (
+                                                <Button
+                                                    variant="secondary"
+                                                    className="text-xs py-2 w-full"
+                                                    onClick={() => setReportChoiceRequest(req)}
+                                                >
+                                                    Relatório
+                                                </Button>
+                                            )}
                                             <div className="flex gap-2 w-full">
                                                 {req.status !== 'paid' && (
                                                     <Button variant="secondary" className="text-xs py-1 flex-1" onClick={() => setEditingRequest(req)}>
@@ -910,6 +1099,7 @@ const PaymentProcessManager = () => {
                         ))}
                     </tbody>
                 </table>
+                </div>
             </div>
 
             {/* Modal de Aviso / Confirmação */}
@@ -922,6 +1112,14 @@ const PaymentProcessManager = () => {
                 />
             )}
 
+            {reportChoiceRequest && (
+                <PaymentReportChoiceModal
+                    request={reportChoiceRequest}
+                    onClose={() => setReportChoiceRequest(null)}
+                    onSelect={handleOpenReportPreview}
+                />
+            )}
+
             {/* Modal de Sucesso (Preview do Processo) */}
             {selectedRequest && (
                 <PaymentDocumentPreview 
@@ -929,32 +1127,40 @@ const PaymentProcessManager = () => {
                     onClose={() => setSelectedRequest(null)} 
                     warnings={expiredCerts.length > 0 || missingCerts.length > 0} // Se veio do fluxo forçado, ainda mostra o aviso visual
                     contracts={contracts}
+                    initialMode={selectedReportMode}
                 />
             )}
 
             {/* Modal de Nova Solicitação */}
             {isNewRequestModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm overflow-y-auto">
-                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden my-8">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden my-8 flex flex-col">
                         <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                             <h3 className="text-lg font-bold text-slate-800">Nova Solicitação de Pagamento</h3>
-                            <button onClick={() => setIsNewRequestModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+                            <button
+                                onClick={() => {
+                                    setIsNewRequestModalOpen(false);
+                                    setNewRequestForm(emptyRequestForm);
+                                    localStorage.removeItem(ADMIN_PAYMENT_DRAFT_KEY);
+                                }}
+                                className="text-slate-400 hover:text-slate-600"
+                            >
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
                             </button>
                         </div>
-                        <div className="p-6 space-y-6">
+                        <div className="p-6 space-y-6 overflow-y-auto">
                             {/* Leitura com IA */}
                             <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 flex flex-col sm:flex-row items-center justify-between gap-4">
                                 <div>
                                     <h4 className="font-bold text-blue-800 text-sm">Preenchimento Automático com IA</h4>
                                     <p className="text-xs text-blue-600 mt-1">Faça o upload da Nota Fiscal e o sistema preencherá os dados abaixo automaticamente.</p>
                                 </div>
-                                <div className="shrink-0">
+                                <div className="shrink-0 w-full sm:w-auto">
                                     <input type="file" id="nf-ai-upload" className="hidden" accept=".pdf,.xml,.jpg,.png" onChange={handleAIUpload} />
                                     <Button 
                                         onClick={() => document.getElementById('nf-ai-upload')?.click()} 
                                         isLoading={isProcessingUpload} 
-                                        className="bg-blue-600 text-white hover:bg-blue-700 text-sm"
+                                        className="bg-blue-600 text-white hover:bg-blue-700 text-sm w-full sm:w-auto"
                                     >
                                         {isProcessingUpload ? 'Lendo...' : 'Ler Nota Fiscal'}
                                     </Button>
@@ -1047,9 +1253,18 @@ const PaymentProcessManager = () => {
                                 </div>
                             </div>
                         </div>
-                        <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
-                            <Button variant="secondary" onClick={() => setIsNewRequestModalOpen(false)}>Cancelar</Button>
-                            <Button onClick={handleNewRequestSubmit} disabled={!newRequestForm.invoiceNumber || !newRequestForm.amount || !newRequestForm.description || !newRequestForm.issueDate || !newRequestForm.clientId}>
+                        <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-col-reverse sm:flex-row justify-end gap-3">
+                            <Button
+                                variant="secondary"
+                                onClick={() => {
+                                    setIsNewRequestModalOpen(false);
+                                    setNewRequestForm(emptyRequestForm);
+                                    localStorage.removeItem(ADMIN_PAYMENT_DRAFT_KEY);
+                                }}
+                            >
+                                Cancelar
+                            </Button>
+                            <Button className="w-full sm:w-auto" onClick={handleNewRequestSubmit} disabled={!newRequestForm.invoiceNumber || !newRequestForm.amount || !newRequestForm.description || !newRequestForm.issueDate || !newRequestForm.clientId}>
                                 Salvar e Iniciar Processo
                             </Button>
                         </div>
@@ -1061,20 +1276,20 @@ const PaymentProcessManager = () => {
 };
 
 export const Administrative: React.FC = () => {
-    const [activeTab, setActiveTab] = useState<'registrations' | 'payments' | 'proposals' | 'contracts' | 'orders'>(() => {
-        return (localStorage.getItem('adminActiveTab') as any) || 'registrations';
+    const [activeTab, setActiveTab] = useState<AdministrativeTabId>(() => {
+        return getSafeAdministrativeTab(localStorage.getItem(ADMIN_ACTIVE_TAB_STORAGE_KEY));
     });
 
     useEffect(() => {
-        localStorage.setItem('adminActiveTab', activeTab);
+        localStorage.setItem(ADMIN_ACTIVE_TAB_STORAGE_KEY, activeTab);
     }, [activeTab]);
-  
+
     return (
       <div className="max-w-7xl mx-auto space-y-8 animate-fade-in-up">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-slate-100">
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-slate-900">Módulo Administrativo</h1>
-            <p className="mt-2 text-slate-500">Gestão de Cadastros, Propostas, Contratos e Solicitações de Pagamento.</p>
+            <p className="mt-2 text-slate-500">Gestão de Cadastros, Propostas e Contratos.</p>
           </div>
         </div>
   
@@ -1084,8 +1299,7 @@ export const Administrative: React.FC = () => {
               {[
                   { id: 'registrations', label: 'Cadastros' },
                   { id: 'proposals', label: 'Propostas & Orçamentos' },
-                  { id: 'contracts', label: 'Contratos' },
-                  { id: 'payments', label: 'Solicitações de Pagamento' }
+                  { id: 'contracts', label: 'Contratos' }
               ].map(tab => (
                   <button
                       key={tab.id}
@@ -1105,8 +1319,7 @@ export const Administrative: React.FC = () => {
         <div className="mt-6">
             {activeTab === 'registrations' && <Registrations />}
             {activeTab === 'proposals' && <Proposals />}
-            {activeTab === 'contracts' && <Contracts />}
-            {activeTab === 'payments' && <PaymentProcessManager />}
+            {activeTab === 'contracts' && <Contracts activeTab={activeTab} />}
         </div>
       </div>
     );
