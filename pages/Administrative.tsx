@@ -7,7 +7,7 @@ import { Proposals } from './Proposals';
 import { Contracts } from './Contracts';
 import { Registrations } from '../components/Registrations';
 import { PaymentRequest, Certificate, Contract, Client } from '../types';
-import { getCertificates, REQUIRED_CERTIFICATE_TYPES } from '../services/certificateService';
+import { getCertificates } from '../services/certificateService';
 import { getCompanySettings, fileToBase64, getCompanyById } from '../services/companyService';
 import { saveIncome, saveExpense } from '../services/financeService';
 import { Company } from '../types';
@@ -17,9 +17,11 @@ import { ADMIN_PAYMENT_DRAFT_KEY, ADMIN_PAYMENT_FILTER_CONTRACT_KEY } from '../u
 import { readCompanyScopedValue, writeCompanyScopedValue } from '../services/storageScope';
 import { ADMIN_ACTIVE_TAB_STORAGE_KEY, getSafeAdministrativeTab } from '../utils/moduleTabs.ts';
 import {
+    getPaymentLetterLayoutRules,
     getPaymentReportPrintLabel,
     getPaymentReportSections,
     getPaymentReportTitle,
+    hasPaymentReportAttachments,
     type PaymentReportMode,
 } from '../utils/paymentReport.ts';
 import { evaluatePaymentRequestCertificates } from '../utils/paymentFormalization.ts';
@@ -134,9 +136,9 @@ const PaymentReportChoiceModal = ({
                             className="rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-500/20"
                         >
                             <p className="text-sm font-bold uppercase tracking-[0.18em] text-slate-400">Somente solicitação</p>
-                            <h4 className="mt-3 text-lg font-bold text-slate-900">Carta e arquivo da solicitação</h4>
+                            <h4 className="mt-3 text-lg font-bold text-slate-900">Apenas a solicitação</h4>
                             <p className="mt-2 text-sm leading-6 text-slate-500">
-                                Gera uma versão própria da solicitação com a carta e a nota fiscal, sem incluir as páginas de certidões.
+                                Baixa somente o arquivo de solicitação gerado pelo sistema, sem anexar nota fiscal ou certidões.
                             </p>
                         </button>
                     </div>
@@ -250,7 +252,10 @@ const PaymentDocumentPreview = ({
     const state = companySettings.state || 'MA';
     const fullDate = `${city} - ${state}, ${day} de ${monthFormatted} de ${year}.`;
     const visibleSections = getPaymentReportSections(reportMode);
+    const showInvoice = visibleSections.includes('invoice');
     const showCertificates = visibleSections.includes('certificates');
+    const hasAttachments = hasPaymentReportAttachments(reportMode);
+    const letterLayout = getPaymentLetterLayoutRules();
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">
@@ -268,7 +273,9 @@ const PaymentDocumentPreview = ({
                         {warnings ? (
                              <p className="text-xs text-yellow-600 font-semibold mt-1">⚠ Gerado com ressalvas (Certidões Pendentes)</p>
                         ) : (
-                             <p className="text-xs text-green-600 font-semibold mt-1">✓ Certidões Válidas Checadas e Anexadas</p>
+                             <p className="text-xs text-green-600 font-semibold mt-1">
+                                {reportMode === 'request_only' ? '✓ Solicitação pronta sem anexos' : '✓ Certidões Válidas Checadas e Anexadas'}
+                             </p>
                         )}
                     </div>
                     <div className="flex flex-wrap justify-end gap-2">
@@ -308,7 +315,7 @@ const PaymentDocumentPreview = ({
                     <div ref={printRef} className="bg-white w-[210mm] min-h-[297mm] shadow-lg relative text-black font-sans print:w-full print:shadow-none">
                         
                         {/* --- PÁGINA 1: SOLICITAÇÃO --- */}
-                        <div className="relative h-[297mm] flex flex-col page-break-after-always">
+                        <div className={`relative h-[297mm] flex flex-col ${hasAttachments ? 'page-break-after-always' : ''}`}>
                             {/* Timbrado (Fundo/Cabeçalho/Rodapé) */}
                             <div className="absolute inset-0 z-0 pointer-events-none">
                                 {companySettings.letterheadUrl && (
@@ -319,7 +326,12 @@ const PaymentDocumentPreview = ({
                             {/* Conteúdo da Carta */}
                             <div 
                                 className="relative z-10 flex flex-col h-full font-serif text-[12pt] leading-relaxed text-justify"
-                                style={{ paddingTop: '6.5cm', paddingBottom: '4cm', paddingLeft: '2.5cm', paddingRight: '2.5cm' }}
+                                style={{
+                                    paddingTop: '6.5cm',
+                                    paddingBottom: letterLayout.content.paddingBottom,
+                                    paddingLeft: '2.5cm',
+                                    paddingRight: '2.5cm',
+                                }}
                             >
                                 
                                 {/* Cabeçalho Logo (Oculto se houver papel timbrado) */}
@@ -381,7 +393,10 @@ const PaymentDocumentPreview = ({
                                 </div>
 
                                 {/* Data e Assinatura */}
-                                <div className="mt-auto flex flex-col items-end">
+                                <div
+                                    className="mt-auto flex shrink-0 flex-col items-end pt-4"
+                                    style={{ transform: `translateY(-${letterLayout.signature.footerClearance})` }}
+                                >
                                     <p className="mb-8 text-right w-full">
                                         {fullDate}
                                     </p>
@@ -389,11 +404,18 @@ const PaymentDocumentPreview = ({
                                     <div className="flex flex-col items-center justify-center relative w-full max-w-md mx-auto mt-4">
                                         {/* Imagem da Assinatura Sobreposta */}
                                         {companySettings.signatureUrl && (
-                                            <div className="h-24 flex items-end justify-center mb-0">
+                                            <div
+                                                className="flex items-center justify-center overflow-hidden mb-0"
+                                                style={{
+                                                    height: letterLayout.signature.imageMaxHeight,
+                                                    maxWidth: letterLayout.signature.imageMaxWidth,
+                                                    width: '100%',
+                                                }}
+                                            >
                                                 <img 
                                                     src={companySettings.signatureUrl} 
                                                     alt="Assinatura" 
-                                                    className="max-h-full mix-blend-multiply" 
+                                                    className="h-full w-full object-contain mix-blend-multiply"
                                                 />
                                             </div>
                                         )}
@@ -403,38 +425,49 @@ const PaymentDocumentPreview = ({
                                         )}
                                     </div>
                                 </div>
-                                
-                                {/* Rodapé Endereço (Oculto se houver papel timbrado) */}
-                                {!companySettings.letterheadUrl && (
-                                    <div className="mt-0 text-center text-[10pt] font-bold text-[#0070c0] border-t border-[#0070c0] pt-2">
-                                        <p className="italic">{companySettings.address}</p>
-                                        <p className="italic">e-mail: {companySettings.email}</p>
-                                        <div className="w-3/4 mx-auto border-t border-black mt-1 mb-1"></div>
-                                        <p className="text-black uppercase text-[11pt]">{companySettings.representative}</p>
-                                        <p className="text-black text-[10pt] font-normal">CPF: {companySettings.cpf}</p>
-                                    </div>
-                                )}
                             </div>
+
+                            {/* Rodapé Endereço (Oculto se houver papel timbrado) */}
+                            {!companySettings.letterheadUrl && (
+                                <div
+                                    className="z-10 overflow-hidden text-center text-[9pt] font-bold leading-tight text-[#0070c0] border-t border-[#0070c0] pt-1"
+                                    style={{
+                                        position: letterLayout.footer.position,
+                                        left: '2.5cm',
+                                        right: '2.5cm',
+                                        bottom: letterLayout.footer.bottom,
+                                        maxHeight: letterLayout.footer.maxHeight,
+                                    }}
+                                >
+                                    <p className="italic truncate">{companySettings.address}</p>
+                                    <p className="italic truncate">e-mail: {companySettings.email}</p>
+                                    <div className="w-3/4 mx-auto border-t border-black mt-1 mb-1"></div>
+                                    <p className="text-black uppercase text-[9.5pt] truncate">{companySettings.representative}</p>
+                                    <p className="text-black text-[8.5pt] font-normal truncate">CPF: {companySettings.cpf}</p>
+                                </div>
+                            )}
                         </div>
 
                         {/* --- PÁGINA 2: NOTA FISCAL --- */}
-                        <div className="relative min-h-[297mm] flex flex-col page-break-after-always bg-white">
-                            <div className="flex-1 flex flex-col items-center justify-center w-full h-full">
-                                {request.invoiceFileContent ? (
-                                    request.invoiceFileContent.startsWith('data:application/pdf') ? (
-                                        <embed src={request.invoiceFileContent} type="application/pdf" className="w-full h-[297mm]" />
+                        {showInvoice && (
+                            <div className="relative min-h-[297mm] flex flex-col page-break-after-always bg-white">
+                                <div className="flex-1 flex flex-col items-center justify-center w-full h-full">
+                                    {request.invoiceFileContent ? (
+                                        request.invoiceFileContent.startsWith('data:application/pdf') ? (
+                                            <embed src={request.invoiceFileContent} type="application/pdf" className="w-full h-[297mm]" />
+                                        ) : (
+                                            <img src={request.invoiceFileContent} alt="Nota Fiscal" className="w-full h-[297mm] object-contain" />
+                                        )
                                     ) : (
-                                        <img src={request.invoiceFileContent} alt="Nota Fiscal" className="w-full h-[297mm] object-contain" />
-                                    )
-                                ) : (
-                                    <div className="text-center p-12 bg-slate-50 rounded-xl w-full h-full flex items-center justify-center flex-col">
-                                        <svg className="w-24 h-24 text-slate-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                                        <p className="text-slate-500 font-medium">Visualização da Nota Fiscal Nº {request.invoiceNumber}</p>
-                                        <p className="text-slate-400 text-sm mt-2">(Arquivo original não disponível na simulação)</p>
-                                    </div>
-                                )}
+                                        <div className="text-center p-12 bg-slate-50 rounded-xl w-full h-full flex items-center justify-center flex-col">
+                                            <svg className="w-24 h-24 text-slate-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                            <p className="text-slate-500 font-medium">Visualização da Nota Fiscal Nº {request.invoiceNumber}</p>
+                                            <p className="text-slate-400 text-sm mt-2">(Arquivo original não disponível na simulação)</p>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                        </div>
+                        )}
 
                         {/* --- PÁGINAS 3+: CERTIDÕES --- */}
                         {showCertificates && (

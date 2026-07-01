@@ -1,12 +1,32 @@
 export type PaymentReportMode = 'complete' | 'request_only';
 export type PaymentReportSection = 'request' | 'invoice' | 'certificates';
 
+export const getPaymentLetterLayoutRules = () => ({
+    content: {
+        paddingBottom: '4.6cm',
+    },
+    signature: {
+        footerClearance: '1.35cm',
+        imageMaxHeight: '1.35cm',
+        imageMaxWidth: '6.5cm',
+    },
+    footer: {
+        position: 'absolute',
+        bottom: '0.85cm',
+        maxHeight: '1.85cm',
+    },
+} as const);
+
 export const getPaymentReportSections = (mode: PaymentReportMode): PaymentReportSection[] => {
     if (mode === 'request_only') {
-        return ['request', 'invoice'];
+        return ['request'];
     }
 
     return ['request', 'invoice', 'certificates'];
+};
+
+export const hasPaymentReportAttachments = (mode: PaymentReportMode) => {
+    return getPaymentReportSections(mode).some((section) => section !== 'request');
 };
 
 export const getPaymentReportTitle = (mode: PaymentReportMode) => {
