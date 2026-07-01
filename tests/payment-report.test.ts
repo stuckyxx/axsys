@@ -34,8 +34,8 @@ test('layout da carta reserva rodapé e limita a assinatura ao espaço interno d
 
   assert.equal(layout.content.paddingBottom, '4.6cm');
   assert.equal(layout.signature.footerClearance, '1.35cm');
-  assert.equal(layout.signature.imageMaxHeight, '1.35cm');
-  assert.equal(layout.signature.imageMaxWidth, '6.5cm');
+  assert.equal(layout.signature.imageMaxHeight, '1.5cm');
+  assert.equal(layout.signature.imageMaxWidth, '7.2cm');
   assert.equal(layout.footer.position, 'absolute');
   assert.equal(layout.footer.bottom, '0.85cm');
   assert.equal(layout.footer.maxHeight, '1.85cm');

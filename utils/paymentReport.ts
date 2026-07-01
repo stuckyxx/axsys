@@ -7,8 +7,8 @@ export const getPaymentLetterLayoutRules = () => ({
     },
     signature: {
         footerClearance: '1.35cm',
-        imageMaxHeight: '1.35cm',
-        imageMaxWidth: '6.5cm',
+        imageMaxHeight: '1.5cm',
+        imageMaxWidth: '7.2cm',
     },
     footer: {
         position: 'absolute',
