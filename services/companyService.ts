@@ -43,6 +43,27 @@ const slugifyCompanyName = (value: string) =>
 
 const buildPublicCertificatesShareId = (companyId: string) => `cert-public-${companyId}`;
 
+type CompanyAddressFields = Pick<Company, 'street' | 'number' | 'neighborhood' | 'zipCode' | 'city' | 'state'>;
+
+const compactText = (value: string | undefined) => value?.trim() || '';
+
+export const buildCompanyAddress = (company: Partial<CompanyAddressFields>): string => {
+    const street = compactText(company.street);
+    const number = compactText(company.number);
+    const neighborhood = compactText(company.neighborhood);
+    const city = compactText(company.city);
+    const state = compactText(company.state);
+    const zipCode = compactText(company.zipCode);
+
+    const streetLine = street && number ? `${street}, ${number}` : street || number;
+    const streetAndNeighborhood = streetLine && neighborhood
+        ? `${streetLine} - ${neighborhood}`
+        : streetLine || neighborhood;
+    const cityAndState = city && state ? `${city} - ${state}` : city || state;
+
+    return [streetAndNeighborhood, cityAndState, zipCode].filter(Boolean).join(', ');
+};
+
 const ensureUniqueSlug = (baseSlug: string, companies: Company[], currentCompanyId: string) => {
     const usedSlugs = new Set(
         companies
@@ -65,9 +86,11 @@ const ensureUniqueSlug = (baseSlug: string, companies: Company[], currentCompany
 
 const normalizeCompanyPublicFields = (company: Company, companies: Company[]): Company => {
     const baseSlug = slugifyCompanyName(company.publicCertificatesSlug || company.corporateName);
+    const address = buildCompanyAddress(company) || company.address;
 
     return {
         ...company,
+        address,
         publicCertificatesSlug: ensureUniqueSlug(baseSlug, companies, company.id),
         publicCertificatesShareId: company.publicCertificatesShareId || buildPublicCertificatesShareId(company.id),
     };

@@ -76,6 +76,72 @@ test('getCompanies normaliza slug e shareId publicos para empresas legadas', () 
   restoreStorage();
 });
 
+test('getCompanies sincroniza address consolidado com os campos de endereco', () => {
+  const restoreStorage = installStorage();
+
+  globalThis.localStorage.setItem(
+    'axsys_companies_db_v2',
+    JSON.stringify([
+      {
+        id: 'comp-001',
+        corporateName: 'Assesi Tecnologia Ltda',
+        publicCertificatesSlug: 'assesi-tecnologia-ltda',
+        publicCertificatesShareId: 'cert-public-comp-001',
+        cnpj: '12.345.678/0001-90',
+        street: 'Rua Nova',
+        number: '200',
+        neighborhood: 'Meireles',
+        zipCode: '60165-000',
+        city: 'Fortaleza',
+        state: 'CE',
+        address: 'Rua Antiga, 10 - Centro, Fortaleza - CE, 60000-000',
+        representative: 'Maria',
+        cpf: '000.000.000-00',
+        email: 'contato@assesi.com',
+        taxRate: 5,
+        banks: [],
+      },
+    ]),
+  );
+
+  const [company] = getCompanies();
+  const storedCompanies = JSON.parse(globalThis.localStorage.getItem('axsys_companies_db_v2') || '[]');
+
+  assert.equal(company.address, 'Rua Nova, 200 - Meireles, Fortaleza - CE, 60165-000');
+  assert.equal(storedCompanies[0].address, 'Rua Nova, 200 - Meireles, Fortaleza - CE, 60165-000');
+
+  restoreStorage();
+});
+
+test('saveCompany recalcula address ao salvar alteracoes de endereco', () => {
+  const restoreStorage = installStorage();
+
+  saveCompany({
+    id: 'comp-001',
+    corporateName: 'Alpha Servicos',
+    cnpj: '11.111.111/0001-11',
+    street: 'Av. Beira Mar',
+    number: '1500',
+    neighborhood: 'Meireles',
+    zipCode: '60165-121',
+    city: 'Fortaleza',
+    state: 'CE',
+    address: 'Rua Antiga, 1',
+    representative: 'Ana',
+    cpf: '000.000.000-00',
+    email: 'alpha@empresa.com',
+    taxRate: 5,
+    banks: [],
+  });
+
+  assert.equal(
+    getCompanyById('comp-001')?.address,
+    'Av. Beira Mar, 1500 - Meireles, Fortaleza - CE, 60165-121',
+  );
+
+  restoreStorage();
+});
+
 test('saveCompany garante slug unico e permite buscar por slug ou shareId', () => {
   const restoreStorage = installStorage();
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Company, User, UserRole, BankAccount, SystemModule } from '../types';
-import { getCompanies, saveCompany, deleteCompany } from '../services/companyService';
+import { buildCompanyAddress, getCompanies, saveCompany, deleteCompany } from '../services/companyService';
 import { getAllUsers, registerMock, deleteUserMock, updateUserDetailsMock, updateUserModulesMock } from '../services/authService';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
@@ -84,7 +84,7 @@ export const SuperAdminPanel = () => {
       zipCode: currentCompany.zipCode || '',
       city: currentCompany.city || '',
       state: currentCompany.state || '',
-      address: `${currentCompany.street || ''}, ${currentCompany.number || ''} - ${currentCompany.neighborhood || ''}, ${currentCompany.city || ''} - ${currentCompany.state || ''}, ${currentCompany.zipCode || ''}`,
+      address: buildCompanyAddress(currentCompany),
       representative: currentCompany.representative || '',
       cpf: currentCompany.cpf || '',
       email: currentCompany.email || '',

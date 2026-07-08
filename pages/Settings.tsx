@@ -4,7 +4,7 @@ import { Input } from '../components/Input';
 import { useAuth } from '../context/AuthContext';
 import { useTrackedStorageRefresh } from '../hooks/useTrackedStorageRefresh.ts';
 import { updateUserDetailsMock } from '../services/authService';
-import { getCompanyById, saveCompany, fileToBase64, getCompanySettings } from '../services/companyService';
+import { buildCompanyAddress, getCompanyById, saveCompany, fileToBase64, getCompanySettings } from '../services/companyService';
 import { Company, SystemModule, UserRole } from '../types';
 
 export const Settings: React.FC = () => {
@@ -142,7 +142,7 @@ export const Settings: React.FC = () => {
     }
 
     try {
-      const fullAddress = `${companyData.street || ''}, ${companyData.number || ''} - ${companyData.neighborhood || ''}, ${companyData.city || ''} - ${companyData.state || ''}, ${companyData.zipCode || ''}`;
+      const fullAddress = buildCompanyAddress(companyData);
       const dataToSave = { ...companyData, address: fullAddress };
 
       saveCompany(dataToSave);
