@@ -37,6 +37,7 @@ O objetivo de segurança não é prometer ausência absoluta de falhas. O objeti
 - Tema escuro padrão e tema claro opcional.
 - Layout responsivo para celular, tablet e desktop.
 - Testes de domínio, integração, RLS, segurança e navegador.
+- Consistência imediata entre telas, abas e indicadores, sem depender de limpeza manual de cache.
 
 ### 2.2 Fora da primeira versão
 
@@ -190,6 +191,25 @@ Requisições empresariais normais usarão a identidade do usuário e continuar�
 
 A Data API não será chamada diretamente pelo navegador. Views expostas serão security invoker. Funções privilegiadas ficarão em schema privado, terão search_path fixo e permissão de execução restrita.
 
+### 6.4 Consistência, atualização e cache
+
+O PostgreSQL será a única fonte de verdade para dados de negócio. Sessões, registros empresariais, permissões, totais e estados de fluxo não serão persistidos como cópias autoritativas no localStorage, IndexedDB ou cache do navegador.
+
+- Rotas autenticadas serão renderizadas dinamicamente; handlers de negócio e respostas com dados sensíveis usarão Cache-Control: no-store e não entrarão no Data Cache ou Full Route Cache do framework.
+- A primeira versão não usará cache persistente, Service Worker ou modo offline para dados empresariais.
+- Recursos estáticos versionados por hash, como JavaScript, CSS e imagens públicas da aplicação, poderão usar cache longo porque a URL muda a cada build.
+- Após uma mutação confirmada, a resposta trará o registro persistido e a interface invalidará todas as consultas afetadas, incluindo listas, detalhes, contadores, dashboard e notificações.
+- Chaves de consulta sempre incluirão usuário, company_id e filtros. Trocar sessão ou empresa descartará todo estado de consulta anterior.
+- Eventos Realtime serão filtrados pela RLS e usados apenas como sinal para buscar novamente o dado autorizado; o cliente não tratará o payload do evento como fonte definitiva.
+- Ao recuperar foco, reconectar a rede ou voltar de suspensão, a aplicação buscará novamente os dados visíveis.
+- Operações financeiras, permissões, publicação de certidões e demais ações críticas não usarão atualização otimista. A UI aguardará a confirmação transacional do servidor.
+- Atualizações comuns poderão usar feedback otimista somente quando houver rollback automático e nenhuma consequência financeira ou de autorização.
+- Registros mutáveis terão version ou updated_at. O update enviará a versão conhecida; se outra sessão já tiver alterado o registro, o servidor responderá com conflito 409 e a interface mostrará os dados atuais antes de permitir nova tentativa.
+- Rascunhos continuarão salvos no banco, separados por usuário e empresa, e não serão confundidos com cache de leitura.
+- Publicação ou revogação de certidão será refletida imediatamente na página pública. A primeira versão usará no-store nessa página e fará o download público atravessar o BFF, que revalida a publicação em cada requisição, para priorizar correção e revogação imediata sobre desempenho.
+
+O critério de experiência é explícito: depois de salvar, arquivar, pagar, publicar, revogar ou alterar uma permissão, a informação correta deve aparecer em todas as telas relacionadas sem o usuário limpar cache, sair da conta ou executar recarga forçada.
+
 ## 7. Autenticação e sessão
 
 ### 7.1 Login
@@ -337,7 +357,7 @@ O conteúdo fica em bucket privado. Caminhos internos usam identificadores aleat
 - Arquivos ficam em quarentena até a varredura.
 - Nomes fornecidos pelo usuário nunca formam o caminho real.
 
-Downloads autenticados e públicos passam por autorização antes de gerar URL assinada curta. Quotas por empresa e rate limits evitam abuso de armazenamento.
+Downloads autenticados passam por autorização antes de gerar URL assinada com validade máxima de 60 segundos. Downloads públicos atravessam o BFF e revalidam a publicação antes de transmitir o arquivo, sem expor uma URL persistente do Storage. Quotas por empresa e rate limits evitam abuso de armazenamento.
 
 ## 11. Modelo de dados
 
@@ -589,6 +609,7 @@ Toda tela define carregando, vazio, sem resultado, sucesso, erro, acesso negado 
 - E-mail, PDF, IA e scanner têm tentativas controladas e estados visíveis.
 - Falha da IA nunca bloqueia o preenchimento manual.
 - A aplicação diferencia validação, conflito, acesso negado, recurso inexistente e indisponibilidade.
+- Um conflito de versão nunca sobrescreve silenciosamente os dados; a interface preserva a edição local, apresenta a versão atual do servidor e permite comparar antes de tentar novamente.
 - Logs estruturados redigem dados pessoais e segredos.
 - Auditoria append-only registra ações críticas, ator, tenant, recurso, resultado, motivo, horário UTC e correlation ID.
 
@@ -640,6 +661,10 @@ Quando o produto for hospedado, as mesmas migrations, políticas, buckets e test
 - uploads, quarentena e downloads;
 - geração e versionamento de PDFs;
 - recuperação de senha e expiração da senha provisória.
+- invalidação de listas, detalhes, contadores e dashboards após cada mutação;
+- detecção de conflito 409 em duas atualizações concorrentes;
+- troca de usuário ou tenant sem reaproveitar estado da sessão anterior;
+- reconexão e eventos Realtime seguidos de nova leitura autorizada.
 
 ### 19.3 RLS e segurança
 
@@ -666,6 +691,10 @@ Quando o produto for hospedado, as mesmas migrations, políticas, buckets e test
 - contrato até solicitação;
 - formalização, pagamento, receita e imposto;
 - publicação e download de certidão.
+- atualização entre duas abas sem recarga forçada;
+- alteração de permissão refletida imediatamente no menu, rota e API;
+- pagamento refletido simultaneamente na solicitação, receita, imposto e dashboard;
+- publicação e revogação refletidas imediatamente na página pública.
 
 ## 20. Ordem de implementação
 
@@ -698,6 +727,7 @@ A implementação será incremental, mas a primeira versão só será declarada 
 - Uploads inválidos não chegam ao bucket operacional.
 - Service role não é usada em CRUD empresarial comum.
 - Super Admin não acessa tabelas operacionais.
+- Dados empresariais autenticados não são servidos por cache compartilhado ou persistente.
 
 ### 21.2 Funcional
 
@@ -713,6 +743,8 @@ A implementação será incremental, mas a primeira versão só será declarada 
 - Certidões preservam histórico e validade inclusiva.
 - Página pública mostra somente versões vigentes publicadas.
 - Timbrado, assinatura e conta escolhida aparecem nos documentos.
+- Toda mutação atualiza listas, detalhes, totais e indicadores relacionados sem limpar cache ou recarregar manualmente.
+- Edições concorrentes são detectadas e não sobrescrevem silenciosamente alterações mais novas.
 
 ### 21.3 Experiência
 
