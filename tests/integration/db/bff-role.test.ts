@@ -361,6 +361,61 @@ describe("axsys_bff", () => {
     }
   })
 
+  it("preserves an authenticated private RLS helper grant during repeated hardening", async () => {
+    const [schemaState] = await supabaseAdminOwnerSql<[{ existed: boolean }]>`
+      select to_regnamespace('private') is not null as existed
+    `
+    if (!schemaState.existed) {
+      await supabaseAdminOwnerSql`create schema private authorization supabase_admin`
+    }
+
+    try {
+      await supabaseAdminOwnerSql.unsafe(`
+        create function private.axsys_authenticated_rls_probe()
+        returns boolean
+        language sql
+        stable
+        security definer
+        set search_path = ''
+        as 'select true';
+        revoke all privileges on function private.axsys_authenticated_rls_probe()
+          from public, anon, authenticated, service_role, axsys_bff;
+        grant execute on function private.axsys_authenticated_rls_probe()
+          to authenticated;
+      `)
+
+      await hardenLocalPublicPrivileges(supabaseAdminUrl.toString())
+
+      const privileges = await supabaseAdminOwnerSql<
+        { roleName: string; canExecute: boolean }[]
+      >`
+        select
+          role_name as "roleName",
+          has_function_privilege(
+            role_name,
+            'private.axsys_authenticated_rls_probe()',
+            'EXECUTE'
+          ) as "canExecute"
+        from unnest(array['anon', 'authenticated', 'service_role', 'axsys_bff']) role_name
+        order by role_name
+      `
+
+      expect(privileges).toEqual([
+        { roleName: "anon", canExecute: false },
+        { roleName: "authenticated", canExecute: true },
+        { roleName: "axsys_bff", canExecute: false },
+        { roleName: "service_role", canExecute: false },
+      ])
+    } finally {
+      await supabaseAdminOwnerSql.unsafe(
+        "drop function if exists private.axsys_authenticated_rls_probe()",
+      )
+      if (!schemaState.existed) {
+        await supabaseAdminOwnerSql`drop schema if exists private`
+      }
+    }
+  })
+
   it("preserves an explicitly allowlisted private BFF function during db:env hardening", async () => {
     const [schemaState] = await supabaseAdminOwnerSql<[{ existed: boolean }]>`
       select to_regnamespace('private') is not null as existed

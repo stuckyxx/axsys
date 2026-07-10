@@ -133,7 +133,15 @@ describe("Supabase custom role bootstrap", () => {
       /revoke all privileges on all functions in schema private[\s\S]*?;/u,
     )?.[0]
     expect(privateFunctionRevoke).toBeDefined()
-    expect(privateFunctionRevoke).not.toContain("axsys_bff")
+    expect(privateFunctionRevoke).toContain("from public;")
+    for (const namedRole of [
+      "anon",
+      "authenticated",
+      "service_role",
+      "axsys_bff",
+    ] as const) {
+      expect(privateFunctionRevoke).not.toContain(namedRole)
+    }
   })
 
   it("rejects reverse axsys_bff grants to any non-administrative member", () => {

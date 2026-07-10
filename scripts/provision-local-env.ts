@@ -77,7 +77,7 @@ do $$
 begin
   if exists (select 1 from pg_namespace where nspname = 'private') then
     revoke all privileges on all functions in schema private
-      from public, anon, authenticated, service_role;
+      from public;
   end if;
 end
 $$;
