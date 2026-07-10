@@ -323,6 +323,44 @@ describe("axsys_bff", () => {
     }
   })
 
+  it("preserves an explicit migration-owned authenticated grant during repeated hardening", async () => {
+    await supabaseAdminOwnerSql.unsafe(`
+      create table public.axsys_explicit_authenticated_probe(id bigint);
+      revoke all privileges on table public.axsys_explicit_authenticated_probe
+        from public, anon, authenticated, service_role, axsys_bff;
+      grant select on table public.axsys_explicit_authenticated_probe to authenticated;
+    `)
+
+    try {
+      await hardenLocalPublicPrivileges(supabaseAdminUrl.toString())
+
+      const privileges = await supabaseAdminOwnerSql<
+        { roleName: string; canSelect: boolean }[]
+      >`
+        select
+          role_name as "roleName",
+          has_table_privilege(
+            role_name,
+            'public.axsys_explicit_authenticated_probe',
+            'SELECT'
+          ) as "canSelect"
+        from unnest(array['anon', 'authenticated', 'service_role', 'axsys_bff']) role_name
+        order by role_name
+      `
+
+      expect(privileges).toEqual([
+        { roleName: "anon", canSelect: false },
+        { roleName: "authenticated", canSelect: true },
+        { roleName: "axsys_bff", canSelect: false },
+        { roleName: "service_role", canSelect: false },
+      ])
+    } finally {
+      await supabaseAdminOwnerSql.unsafe(
+        "drop table if exists public.axsys_explicit_authenticated_probe",
+      )
+    }
+  })
+
   it("preserves an explicitly allowlisted private BFF function during db:env hardening", async () => {
     const [schemaState] = await supabaseAdminOwnerSql<[{ existed: boolean }]>`
       select to_regnamespace('private') is not null as existed

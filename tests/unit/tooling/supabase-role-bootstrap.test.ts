@@ -114,6 +114,21 @@ describe("Supabase custom role bootstrap", () => {
     )
     expect(provisionerSource).toContain("from pg_default_acl")
     expect(provisionerSource).toContain("aclexplode")
+    const repeatableHardeningSql = provisionerSource.match(
+      /const PUBLIC_PRIVILEGE_HARDENING_SQL = `([\s\S]*?)`/u,
+    )?.[1]
+    expect(repeatableHardeningSql).toBeDefined()
+    for (const objectType of ["tables", "sequences", "functions"] as const) {
+      expect(repeatableHardeningSql).toContain(
+        `revoke all privileges on all ${objectType} in schema public from public;`,
+      )
+      expect(repeatableHardeningSql).not.toContain(
+        `revoke all privileges on all ${objectType} in schema public from anon, authenticated, service_role;`,
+      )
+    }
+    expect(repeatableHardeningSql).toContain(
+      "revoke all privileges on all functions in schema public from axsys_bff;",
+    )
     const privateFunctionRevoke = provisionerSource.match(
       /revoke all privileges on all functions in schema private[\s\S]*?;/u,
     )?.[0]
