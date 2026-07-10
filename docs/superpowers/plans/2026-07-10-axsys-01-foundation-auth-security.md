@@ -1360,6 +1360,8 @@ git commit -m "feat: configure local Supabase and restricted BFF role"
 - Create via CLI: `supabase/migrations/<CLI_TIMESTAMP>_foundation_identity.sql`
 - Create: `supabase/tests/database/helpers/fixtures.inc`
 - Create: `supabase/tests/database/01_foundation_identity.test.sql`
+- Create: `tests/integration/db/identity-concurrency.test.ts`
+- Modify: `tests/integration/db/bff-role.test.ts`
 
 - [ ] **Step 1: Criar o include de fixtures transacionais sem senha de usuário**
 
@@ -1499,15 +1501,79 @@ select results_eq(
   $$select relname::text from pg_class join pg_namespace n on n.oid = relnamespace
     where n.nspname = 'public'
       and relname in ('profiles','platform_roles','companies','company_memberships','member_modules')
-      and relrowsecurity order by relname$$,
+      and relrowsecurity
+      and relforcerowsecurity
+    order by relname$$,
   $$values ('companies'),('company_memberships'),('member_modules'),('platform_roles'),('profiles')$$,
-  'todas as tabelas base habilitam RLS'
+  'todas as tabelas base habilitam e forçam RLS'
 );
 select col_is_unique('public', 'company_memberships', 'user_id');
+
+select is_empty(
+  $$select role_name || ':' || relation_name || ':' || privilege_name
+    from unnest(array['anon','authenticated','service_role','axsys_bff']) roles(role_name)
+    cross join unnest(array['profiles','platform_roles','companies','company_memberships','member_modules']) relations(relation_name)
+    cross join unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) privileges(privilege_name)
+    where has_table_privilege(
+      role_name,
+      format('public.%I', relation_name),
+      privilege_name
+    )$$,
+  'nenhum papel de API/BFF herda privilégio de tabela'
+);
+select has_schema('private');
+select ok(
+  coalesce(
+    has_schema_privilege('axsys_bff', to_regnamespace('private'), 'USAGE'),
+    false
+  ),
+  'axsys_bff recebe somente USAGE no schema privado'
+);
+select ok(
+  not coalesce(
+    has_schema_privilege('service_role', to_regnamespace('private'), 'USAGE'),
+    false
+  ),
+  'service_role não recebe USAGE no schema privado'
+);
+select is_empty(
+  $$select proc.oid::regprocedure::text || ':' ||
+           coalesce(grantee.rolname, 'PUBLIC') || ':' || grant_item.privilege_type
+    from pg_proc proc
+    join pg_namespace namespace on namespace.oid = proc.pronamespace
+    cross join lateral aclexplode(
+      coalesce(proc.proacl, acldefault('f', proc.proowner))
+    ) grant_item
+    left join pg_roles grantee on grantee.oid = grant_item.grantee
+    where namespace.nspname = 'private'
+      and (
+        grant_item.grantee = 0
+        or grantee.rolname in ('anon','authenticated','service_role','axsys_bff')
+      )$$,
+  'funções privadas não possuem EXECUTE inesperado'
+);
+
+-- Somente o runner pgTAP recebe acesso transacional às assertions; o rollback remove estes grants.
+grant usage on schema extensions to authenticated, service_role;
+grant execute on all functions in schema extensions to authenticated, service_role;
+set local role authenticated;
+select extensions.throws_ok(
+  $$select user_id from public.profiles limit 1$$,
+  '42501', null, 'authenticated não lê tabela base sem grant'
+);
+reset role;
+set local role service_role;
+select extensions.throws_ok(
+  $$select id from public.companies limit 1$$,
+  '42501', null, 'service_role BYPASSRLS continua bloqueado sem grant'
+);
+reset role;
 
 select * from finish();
 rollback;
 ```
+
+Use the pgTAP harness already verified by `00_harness.test.sql` and supplied by `supabase test db`; do not install or persist pgTAP from this test file. The only grants above are transaction-local test access to the existing assertion functions and disappear on rollback.
 
 Run: `npm run db:test -- supabase/tests/database/01_foundation_identity.test.sql`
 
@@ -1528,6 +1594,47 @@ Expected: `Created new migration at supabase/migrations/<timestamp>_foundation_i
 Put this complete SQL in the CLI-created migration:
 
 ```sql
+do $$
+begin
+  if current_user <> 'postgres' then
+    raise exception using
+      errcode = 'P0001',
+      message = 'AXSYS_IDENTITY_MIGRATION_OWNER_INVALID';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_default_acl defaults
+    where defaults.defaclrole = 'postgres'::regrole
+      and defaults.defaclnamespace = 0
+      and defaults.defaclobjtype = 'f'
+      and not exists (
+        select 1
+        from aclexplode(defaults.defaclacl) grant_item
+        left join pg_roles grantee on grantee.oid = grant_item.grantee
+        where grant_item.grantee = 0
+           or grantee.rolname in ('anon','authenticated','service_role','axsys_bff')
+      )
+  ) or exists (
+    select 1
+    from pg_default_acl defaults
+    cross join lateral aclexplode(defaults.defaclacl) grant_item
+    left join pg_roles grantee on grantee.oid = grant_item.grantee
+    where defaults.defaclrole = 'postgres'::regrole
+      and defaults.defaclnamespace = 0
+      and defaults.defaclobjtype in ('r','S','f')
+      and (
+        grant_item.grantee = 0
+        or grantee.rolname in ('anon','authenticated','service_role','axsys_bff')
+      )
+  ) then
+    raise exception using
+      errcode = 'P0001',
+      message = 'AXSYS_GLOBAL_DEFAULT_ACL_NOT_HARDENED';
+  end if;
+end
+$$;
+
 create extension if not exists citext with schema extensions;
 
 create type public.company_status as enum ('active', 'archived');
@@ -1538,8 +1645,9 @@ create type public.module_key as enum ('administrative', 'financial', 'certifica
 create type public.theme_preference as enum ('dark', 'light');
 
 create schema if not exists private;
-revoke all on schema private from public, anon, authenticated;
+revoke all on schema private from public, anon, authenticated, service_role, axsys_bff;
 grant usage on schema private to axsys_bff;
+-- Defesa em profundidade por schema; a autoridade é o revoke global validado acima.
 alter default privileges for role postgres in schema private
   revoke execute on functions from public;
 alter default privileges for role postgres in schema private
@@ -1704,24 +1812,38 @@ create function private.protect_last_company_admin() returns trigger
 language plpgsql
 set search_path = ''
 as $$
+declare
+  v_leaves_active_admin_set boolean;
 begin
-  if old.role = 'company_admin' and old.status = 'active'
-     and (tg_op = 'DELETE' or new.role <> 'company_admin' or new.status <> 'active')
-     and not exists (
-       select 1 from public.company_memberships other
-       where other.company_id = old.company_id
-         and other.id <> old.id
-         and other.role = 'company_admin'
-         and other.status = 'active'
-     ) then
-    raise exception using errcode = '23514', message = 'last_active_company_admin';
+  if tg_op = 'DELETE' then
+    v_leaves_active_admin_set := true;
+  else
+    v_leaves_active_admin_set :=
+      new.company_id is distinct from old.company_id
+      or new.role is distinct from 'company_admin'::public.membership_role
+      or new.status is distinct from 'active'::public.membership_status;
+  end if;
+
+  if old.role = 'company_admin'
+     and old.status = 'active'
+     and v_leaves_active_admin_set then
+    perform pg_advisory_xact_lock(hashtextextended(old.company_id::text, 2102));
+    if not exists (
+      select 1 from public.company_memberships other
+      where other.company_id = old.company_id
+        and other.id <> old.id
+        and other.role = 'company_admin'
+        and other.status = 'active'
+    ) then
+      raise exception using errcode = '23514', message = 'last_active_company_admin';
+    end if;
   end if;
   return case when tg_op = 'DELETE' then old else new end;
 end;
 $$;
 
 create trigger protect_last_company_admin
-before update of role, status or delete on public.company_memberships
+before update of company_id, role, status or delete on public.company_memberships
 for each row execute function private.protect_last_company_admin();
 
 alter table public.profiles enable row level security;
@@ -1740,9 +1862,15 @@ revoke all on public.profiles, public.platform_roles, public.companies,
 revoke all on all functions in schema private from public, anon, authenticated, service_role, axsys_bff;
 ```
 
-Every later migration is required to create private functions as the same migration owner so these defaults apply, and still issues explicit per-routine REVOKE/GRANT. Add a pgTAP catalog scan over `aclexplode(coalesce(proacl,acldefault('f',proowner)))` that fails for any unexpected PUBLIC/anon/authenticated/service_role/axsys_bff EXECUTE in schema private; a second assertion proves service_role has no schema USAGE. Repeat this scan after all plans in the final gate.
+Task 4's checked-in `roles.sql` and local provisioner establish the global default ACL for the `postgres` migration owner before this migration runs. The leading catalog assertion above is mandatory: a schema-local `ALTER DEFAULT PRIVILEGES ... IN SCHEMA private REVOKE` cannot cancel a global grant, so the migration fails before creating application objects unless the global function default exists and PUBLIC/anon/authenticated/service_role/axsys_bff have no global table/sequence/function grant. Every later migration must use that same owner and still issue explicit per-routine REVOKE/GRANT. Add a pgTAP catalog scan over `aclexplode(coalesce(proacl,acldefault('f',proowner)))` that fails for any unexpected PUBLIC/anon/authenticated/service_role/axsys_bff EXECUTE in schema private; a second assertion proves service_role has no schema USAGE. Repeat this scan after all plans in the final gate.
 
-Add a dblink/two-connection race that concurrently inserts `platform_roles` and `company_memberships` for the same new user; exactly one commits and the other gets `identity_scope_conflict`. Repeat for opposite `user_id` updates and prove deterministic old/new lock ordering with no deadlock.
+Including `company_id` in the last-admin trigger protects the old company during the Task 5 window but does not by itself make membership identity immutable. Plan 02 still installs the explicit `guard_membership_identity` prohibition and replaces DELETE with the suspension-only workflow; that later hardening complements rather than removes this company-scoped advisory lock.
+
+Create `tests/integration/db/identity-concurrency.test.ts` with Postgres.js and without installing or calling `dblink`. It rejects every non-loopback `DATABASE_URL`, opens exactly two independent connections (`max:1`, distinct fixed `application_name`), and commits otherwise-valid prerequisite fixtures through worker A before starting either race. For the identity insert race, worker A takes the exact session-level advisory key `hashtextextended(user_id::text,1672)`, inserts `platform_roles` inside an explicit transaction, and holds that transaction open; worker B concurrently starts its transaction and attempts the matching `company_memberships` insert. Worker A polls `pg_stat_activity` until worker B reports `wait_event_type='Lock'` and `wait_event='advisory'`, then commits and releases the session gate. Exactly one transaction commits, the other rejects with SQLSTATE `23514` and message `identity_scope_conflict`, and a postcondition proves the user exists in exactly one identity scope. For opposite `user_id` updates, release both transactions from one in-process barrier with fixed `lock_timeout`/`statement_timeout`; both must settle with `identity_scope_conflict`, never `40P01`, proving the sorted old/new lock order.
+
+Add a second deterministic race for `protect_last_company_admin`: commit a company with exactly two active admins, let worker A hold the company key `hashtextextended(company_id::text,2102)` and its first suspension transaction open, start worker B's suspension, observe B blocked, then commit A and release the gate. Exactly one commits, the other returns `23514/last_active_company_admin`, and exactly one active admin remains. Every test uses unique allowlisted fixture UUIDs and `finally` releases session locks, cleans committed fixtures, and closes both workers. Because the last-admin invariant intentionally prevents ordinary deletion of the final admin, its local-only cleanup runs as the validated loopback migration owner in one transaction: acquire `ACCESS EXCLUSIVE` on `company_memberships`, disable only `protect_last_company_admin`, delete only the exact fixture UUIDs in FK order, re-enable that trigger, verify it is enabled plus all fixture rows are absent, and commit. Any cleanup error rolls back the transactional trigger change and fails the test. Never truncate shared tables, install an extension, or accept a remote database.
+
+Now tighten `tests/integration/db/bff-role.test.ts`: through its real `BFF_DATABASE_URL` login, direct SELECT against each of the five new base tables must reject with SQLSTATE `42501`. `does not exist` is no longer an accepted alternative after this migration. This is the executable `axsys_bff` denial; do not emulate that login with `SET ROLE` in pgTAP.
 
 - [ ] **Step 5: Resetar do zero e confirmar GREEN**
 
@@ -1752,10 +1880,12 @@ Run:
 npm run db:reset
 npm run db:env
 npm run db:test -- supabase/tests/database/01_foundation_identity.test.sql
+npm run test:integration -- tests/integration/db/bff-role.test.ts
+npm run test:integration -- tests/integration/db/identity-concurrency.test.ts
 npm run db:lint
 ```
 
-Expected: migration aplicada, 13 testes PASS e `No schema errors found`.
+Expected: migration aplicada; todas as assertions nomeadas pelo `no_plan()` passam; as três corridas determinísticas passam sem deadlock nem resíduos; lint retorna `No schema errors found`.
 
 - [ ] **Step 6: Confirmar constraints comportamentais com novo RED/GREEN**
 
@@ -1767,14 +1897,40 @@ insert into public.profiles (user_id, email, display_name)
 values ('10000000-0000-4000-8000-000000000001', 'platform@example.test', 'Platform Admin');
 insert into public.platform_roles (user_id)
 values ('10000000-0000-4000-8000-000000000001');
+insert into public.companies (id, legal_name, cnpj_normalized, contact_email)
+values (
+  '30000000-0000-4000-8000-000000000001',
+  'Empresa Válida',
+  '10000000000001',
+  'empresa.valida@example.test'
+);
 
 select throws_ok(
   $$insert into public.company_memberships (company_id, user_id, role)
     values ('30000000-0000-4000-8000-000000000001',
             '10000000-0000-4000-8000-000000000001', 'company_admin')$$,
+  '23514',
+  'identity_scope_conflict',
+  'membership de identidade platform falha no BEFORE trigger'
+);
+
+select test_helpers.create_auth_user(
+  '10000000-0000-4000-8000-000000000002',
+  'member-without-company@example.test'
+);
+insert into public.profiles (user_id, email, display_name)
+values (
+  '10000000-0000-4000-8000-000000000002',
+  'member-without-company@example.test',
+  'Member Without Company'
+);
+select throws_ok(
+  $$insert into public.company_memberships (company_id, user_id, role)
+    values ('30000000-0000-4000-8000-000000000099',
+            '10000000-0000-4000-8000-000000000002', 'member')$$,
   '23503',
   null,
-  'membership exige empresa existente antes de testar exclusividade'
+  'membership não-platform com empresa ausente isola o FK de company_id'
 );
 select throws_ok(
   $$insert into public.companies (legal_name, cnpj_normalized, contact_email)
@@ -1785,14 +1941,28 @@ select throws_ok(
 );
 select throws_ok(
   $$insert into public.profiles (user_id, email, display_name)
-    values (gen_random_uuid(), 'UPPER@example.test', 'Email Inválido')$$,
+    values ('10000000-0000-4000-8000-000000000004',
+            'missing-auth@example.test', 'Missing Auth User')$$,
   '23503',
   null,
-  'profile sem auth.user é rejeitado antes de expor email divergente'
+  'profile normalizado sem auth.user isola o FK de user_id'
+);
+
+select test_helpers.create_auth_user(
+  '10000000-0000-4000-8000-000000000003',
+  'normalized@example.test'
+);
+select throws_ok(
+  $$insert into public.profiles (user_id, email, display_name)
+    values ('10000000-0000-4000-8000-000000000003',
+            'UPPER@example.test', 'Email Inválido')$$,
+  '23514',
+  null,
+  'auth.user existente isola profiles_email_normalized'
 );
 ```
 
-Run the pgTAP file again. Expected: 16 tests PASS. These checks intentionally distinguish FK and CHECK failures; later RLS tests cover authorization.
+Run the pgTAP file again. Expected: every named assertion discovered by `no_plan()` passes. These fixtures deliberately ensure that each BEFORE trigger, FK, and CHECK test has only one eligible failure boundary; later RLS tests cover authorized row visibility.
 
 - [ ] **Step 7: Gerar types e commit**
 
@@ -1806,7 +1976,7 @@ npm run typecheck
 Expected: `src/lib/supabase/database.types.ts` generated and TypeScript clean.
 
 ```bash
-git add supabase/migrations/*_foundation_identity.sql supabase/tests/database/helpers/fixtures.inc supabase/tests/database/01_foundation_identity.test.sql src/lib/supabase/database.types.ts
+git add supabase/migrations/*_foundation_identity.sql supabase/tests/database/helpers/fixtures.inc supabase/tests/database/01_foundation_identity.test.sql tests/integration/db/bff-role.test.ts tests/integration/db/identity-concurrency.test.ts src/lib/supabase/database.types.ts
 git commit -m "feat: add tenant identity schema"
 ```
 
