@@ -19,6 +19,7 @@ export function AxsysThemeProvider({
       attribute="class"
       defaultTheme={initialTheme}
       enableSystem={false}
+      key={userId}
       storageKey={`axsys-theme:${userId}`}
     >
       {children}

@@ -5,12 +5,14 @@ import { cn } from "@/lib/utils"
 type AxsysLogoProps = {
   variant?: "compact" | "horizontal"
   monochrome?: boolean
+  preload?: boolean
   className?: string
 }
 
 export function AxsysLogo({
   variant = "horizontal",
   monochrome = false,
+  preload = false,
   className,
 }: AxsysLogoProps) {
   return (
@@ -25,7 +27,7 @@ export function AxsysLogo({
         alt=""
         className="h-8 w-auto"
         height={32}
-        priority
+        preload={preload}
         src={
           monochrome
             ? variant === "compact"

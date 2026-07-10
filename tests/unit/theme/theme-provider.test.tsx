@@ -26,6 +26,12 @@ function ThemeControls() {
   )
 }
 
+function ThemeProbe() {
+  const { theme } = useTheme()
+
+  return <output data-testid="active-theme">{theme}</output>
+}
+
 afterEach(() => {
   localStorage.clear()
   document.documentElement.className = ""
@@ -96,6 +102,34 @@ describe("AxsysThemeProvider", () => {
       expect(screen.getByTestId("sonner-toaster")).toHaveAttribute("data-theme", "light")
     })
     expect(nextTab.container.querySelectorAll("script")).toHaveLength(1)
+    expect(localStorage.getItem("axsys-theme:public")).toBeNull()
+  })
+
+  it("reinicia o provider ao trocar de usuário sem desmontar o chamador", async () => {
+    localStorage.setItem("axsys-theme:user-a", "dark")
+    localStorage.setItem("axsys-theme:user-b", "light")
+
+    const { rerender } = render(
+      <AxsysThemeProvider userId="user-a" initialTheme="dark">
+        <ThemeProbe />
+      </AxsysThemeProvider>,
+    )
+
+    await waitFor(() => {
+      expect(document.documentElement).toHaveClass("dark")
+      expect(screen.getByTestId("active-theme")).toHaveTextContent("dark")
+    })
+
+    rerender(
+      <AxsysThemeProvider userId="user-b" initialTheme="dark">
+        <ThemeProbe />
+      </AxsysThemeProvider>,
+    )
+
+    await waitFor(() => {
+      expect(document.documentElement).toHaveClass("light")
+      expect(screen.getByTestId("active-theme")).toHaveTextContent("light")
+    })
     expect(localStorage.getItem("axsys-theme:public")).toBeNull()
   })
 })
