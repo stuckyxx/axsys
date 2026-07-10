@@ -37,4 +37,83 @@ describe("Supabase custom role bootstrap", () => {
     ])
     expect(usageGrant).not.toContain("axsys_bff")
   })
+
+  it("revokes existing and future public object grants from API bearer roles for both owners", () => {
+    const rolesSource = readFileSync(resolve("supabase/roles.sql"), "utf8")
+    const provisionerSource = readFileSync(
+      resolve("scripts/provision-local-env.ts"),
+      "utf8",
+    )
+
+    for (const objectType of ["tables", "sequences", "functions"] as const) {
+      expect(rolesSource).toContain(
+        `revoke all privileges on all ${objectType} in schema public from anon, authenticated, service_role;`,
+      )
+      expect(rolesSource).toMatch(
+        new RegExp(
+          `alter default privileges for role postgres in schema public\\s+revoke all privileges on ${objectType} from anon, authenticated, service_role;`,
+          "u",
+        ),
+      )
+      expect(rolesSource).toMatch(
+        new RegExp(
+          `alter default privileges for role postgres\\s+revoke all privileges on ${objectType} from anon, authenticated, service_role;`,
+          "u",
+        ),
+      )
+      expect(provisionerSource).toMatch(
+        new RegExp(
+          `alter default privileges for role supabase_admin in schema public\\s+revoke all privileges on ${objectType} from anon, authenticated, service_role;`,
+          "u",
+        ),
+      )
+      for (const owner of ["postgres", "supabase_admin"] as const) {
+        expect(provisionerSource).toMatch(
+          new RegExp(
+            `alter default privileges for role ${owner}\\s+revoke all privileges on ${objectType} from anon, authenticated, service_role;`,
+            "u",
+          ),
+        )
+      }
+    }
+
+    expect(rolesSource).not.toContain("set role supabase_admin")
+    expect(rolesSource).toMatch(
+      /alter default privileges for role postgres\s+revoke all privileges on functions from public;/u,
+    )
+    expect(provisionerSource).toContain('url.username = "supabase_admin"')
+    for (const owner of ["postgres", "supabase_admin"] as const) {
+      expect(provisionerSource).toMatch(
+        new RegExp(
+          `alter default privileges for role ${owner}\\s+revoke all privileges on functions from public;`,
+          "u",
+        ),
+      )
+      expect(provisionerSource).toMatch(
+        new RegExp(
+          `alter default privileges for role ${owner} in schema public\\s+revoke all privileges on functions from public;`,
+          "u",
+        ),
+      )
+    }
+    expect(provisionerSource).toContain("defaults.defaclnamespace = 0")
+    expect(provisionerSource).toContain("from pg_default_acl")
+    expect(provisionerSource).toContain("aclexplode")
+    expect(provisionerSource).toContain("grant_item.grantee = 0")
+    const privateFunctionRevoke = provisionerSource.match(
+      /revoke all privileges on all functions in schema private[\s\S]*?;/u,
+    )?.[0]
+    expect(privateFunctionRevoke).toBeDefined()
+    expect(privateFunctionRevoke).not.toContain("axsys_bff")
+  })
+
+  it("rejects reverse axsys_bff grants to any non-administrative member", () => {
+    const source = readFileSync(resolve("supabase/roles.sql"), "utf8")
+
+    expect(source).toContain(
+      "roleid = (select oid from pg_roles where rolname = 'axsys_bff')",
+    )
+    expect(source).toMatch(/member_role\.rolname not in \('postgres', 'supabase_admin'\)/u)
+    expect(source).toContain("unexpected reverse membership")
+  })
 })

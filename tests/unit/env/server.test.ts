@@ -56,4 +56,29 @@ describe("serverEnv", () => {
     expect(thrown).toEqual(new Error("Invalid server environment"))
     expect(String(thrown)).not.toContain(rejectedSecret)
   })
+
+  it.each([
+    "postgres-evil://axsys_bff:local-only@127.0.0.1:54322/postgres",
+    "postgresqlx://axsys_bff:local-only@127.0.0.1:54322/postgres",
+    "postgresql://postgres:local-only@127.0.0.1:54322/postgres",
+    "postgres://service_role:local-only@127.0.0.1:54322/postgres",
+  ])("rejects a non-BFF database identity without echoing the URL: %s", async (databaseUrl) => {
+    vi.stubEnv("SUPABASE_SECRET_KEY", `sb_secret_${"s".repeat(24)}`)
+    vi.stubEnv("BFF_DATABASE_URL", databaseUrl)
+    vi.stubEnv("APP_ORIGIN", "http://127.0.0.1:3000")
+    vi.stubEnv("CSRF_SECRET", "c".repeat(32))
+    vi.stubEnv("SECURITY_HASH_PEPPER", "p".repeat(32))
+    vi.stubEnv("TRUST_PROXY", "false")
+
+    const { getServerEnv } = await import("@/lib/env/server")
+
+    let thrown: unknown
+    try {
+      getServerEnv()
+    } catch (error) {
+      thrown = error
+    }
+    expect(thrown).toEqual(new Error("Invalid server environment"))
+    expect(String(thrown)).not.toContain(databaseUrl)
+  })
 })

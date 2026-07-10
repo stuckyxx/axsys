@@ -3,16 +3,37 @@ import "server-only"
 import postgres, { type Sql } from "postgres"
 import { getServerEnv } from "@/lib/env/server"
 
-let bffSql: Sql | undefined
+const BFF_DATABASE_FAILURE = "BFF database unavailable"
+let bffSql: Promise<Sql> | undefined
 
-function getSql(): Sql {
-  bffSql ??= postgres(getServerEnv().BFF_DATABASE_URL, {
+async function createVerifiedSql(): Promise<Sql> {
+  const sql = postgres(getServerEnv().BFF_DATABASE_URL, {
     max: 5,
     idle_timeout: 20,
     connect_timeout: 10,
     prepare: false,
     connection: { application_name: "axsys-bff" },
   })
+  try {
+    const [identity] = await sql<[{ valid: boolean }]>`
+      select current_user = 'axsys_bff' as valid
+    `
+    if (identity?.valid !== true) {
+      throw new Error(BFF_DATABASE_FAILURE)
+    }
+    return sql
+  } catch {
+    try {
+      await sql.end()
+    } catch {
+      // The fixed outward error remains independent of driver and connection details.
+    }
+    throw new Error(BFF_DATABASE_FAILURE)
+  }
+}
+
+async function getSql(): Promise<Sql> {
+  bffSql ??= createVerifiedSql()
   return bffSql
 }
 
@@ -30,7 +51,8 @@ export const bffDb = {
     windowSeconds: number
     blockSeconds: number
   }): Promise<RateLimitDecision> {
-    const [row] = await getSql()<RateLimitDecision[]>`
+    const sql = await getSql()
+    const [row] = await sql<RateLimitDecision[]>`
       select allowed, attempts, retry_after_seconds as "retryAfterSeconds"
       from private.consume_rate_limit(
         ${input.bucket},
@@ -44,7 +66,8 @@ export const bffDb = {
   },
 
   async clearRateLimit(bucket: string, keyHash: string): Promise<void> {
-    await getSql()`select private.clear_rate_limit(${bucket}, ${keyHash})`
+    const sql = await getSql()
+    await sql`select private.clear_rate_limit(${bucket}, ${keyHash})`
   },
 
   async registerAuthSession(
@@ -52,7 +75,8 @@ export const bffDb = {
     userId: string,
     rememberMe: boolean,
   ): Promise<string> {
-    const [row] = await getSql()<[{ expiresAt: string }]>`
+    const sql = await getSql()
+    const [row] = await sql<[{ expiresAt: string }]>`
       select private.register_auth_session(
         ${sessionId}::uuid,
         ${userId}::uuid,
@@ -63,7 +87,8 @@ export const bffDb = {
   },
 
   async assertAuthSession(sessionId: string, userId: string): Promise<boolean> {
-    const [row] = await getSql()<[{ active: boolean }]>`
+    const sql = await getSql()
+    const [row] = await sql<[{ active: boolean }]>`
       select private.assert_auth_session(
         ${sessionId}::uuid,
         ${userId}::uuid

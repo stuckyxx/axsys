@@ -1,9 +1,13 @@
+import { EventEmitter } from "node:events"
 import { readFileSync } from "node:fs"
+import { PassThrough } from "node:stream"
 import { resolve } from "node:path"
 import { describe, expect, expectTypeOf, it, vi } from "vitest"
 import {
+  COMMAND_TIMEOUTS,
   REQUIRED_CONTAINERS,
   areRequiredContainersReady,
+  executeBoundedCommand,
   formatStartupFailure,
   parseContainerState,
   probeLocalEndpoints,
@@ -145,16 +149,22 @@ describe("local Supabase start wrapper", () => {
   it("validates status and probes only after health succeeds", async () => {
     const events: string[] = []
     const runtime: StartRuntime = {
-      startStack: () => events.push("start"),
+      startStack: () => {
+        events.push("start")
+      },
       inspectContainers: () => {
         events.push("inspect")
         return readyContainers()
       },
-      validateStatus: () => events.push("status"),
+      validateStatus: () => {
+        events.push("status")
+      },
       probeEndpoints: async () => {
         events.push("probes")
       },
-      stopStack: () => events.push("stop"),
+      stopStack: () => {
+        events.push("stop")
+      },
       now: () => 0,
       sleep: async () => {},
     }
@@ -202,6 +212,80 @@ describe("local Supabase start wrapper", () => {
       '["supabase", "start", "--ignore-health-check", "--exclude", "edge-runtime,imgproxy"]',
     )
     expect(source).toContain('["supabase", "status", "-o", "json"]')
+  })
+
+  it("gives every subprocess a finite timeout and kills the detached process group", async () => {
+    for (const [kind, timeout] of Object.entries(COMMAND_TIMEOUTS)) {
+      expect(timeout, kind).toBeGreaterThan(0)
+      expect(timeout, kind).toBeLessThanOrEqual(10 * 60 * 1000)
+    }
+
+    const child = Object.assign(new EventEmitter(), {
+      pid: 4242,
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      kill: vi.fn(() => true),
+    })
+    let triggerTimeout: (() => void) | undefined
+    const spawnCommand = vi.fn(() => child)
+    const killProcessGroup = vi.fn()
+    const result = executeBoundedCommand(
+      "docker",
+      ["inspect", "container"],
+      COMMAND_TIMEOUTS.inspect,
+      {
+        spawnCommand,
+        killProcessGroup,
+        setTimer: (callback) => {
+          triggerTimeout = callback
+          return 1
+        },
+        clearTimer: vi.fn(),
+      },
+    )
+
+    expect(spawnCommand).toHaveBeenCalledWith(
+      "docker",
+      ["inspect", "container"],
+      expect.objectContaining({
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+    )
+    triggerTimeout?.()
+    await expect(result).rejects.toEqual(new Error("Local Supabase startup failed"))
+    expect(killProcessGroup).toHaveBeenCalledWith(4242, "SIGKILL")
+
+    const source = readFileSync(resolve("scripts/start-local-supabase.ts"), "utf8")
+    for (const kind of ["start", "inspect", "status", "stop"] as const) {
+      expect(source).toContain(`COMMAND_TIMEOUTS.${kind}`)
+    }
+  })
+
+  it("keeps timeout cleanup bounded and returns only the generic failure", async () => {
+    const timeoutError = Object.assign(
+      new Error("command timed out with postgresql://user:credential@localhost/db"),
+      { code: "ETIMEDOUT" },
+    )
+    const stopStack = vi.fn(() => {
+      throw timeoutError
+    })
+    const runtime: StartRuntime = {
+      startStack: () => {
+        throw timeoutError
+      },
+      inspectContainers: () => ({}),
+      validateStatus: () => {},
+      probeEndpoints: async () => {},
+      stopStack,
+      now: () => 0,
+      sleep: async () => {},
+    }
+
+    await expect(runStartWorkflow(runtime)).rejects.toEqual(
+      new Error("Local Supabase startup failed"),
+    )
+    expect(stopStack).toHaveBeenCalledOnce()
   })
 
   it("probes auth, REST, Realtime, storage, Studio, and Mailpit without reading bodies", async () => {

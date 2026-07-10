@@ -1,5 +1,6 @@
-import { execFileSync } from "node:child_process"
+import { spawn } from "node:child_process"
 import { resolve } from "node:path"
+import type { Readable } from "node:stream"
 import { pathToFileURL } from "node:url"
 
 export const REQUIRED_CONTAINERS = [
@@ -22,17 +23,19 @@ export type ContainerInspection = {
 
 export type ContainerState = ContainerInspection
 
+type Awaitable<T> = T | Promise<T>
+
 type WaitDependencies = {
-  inspectContainers: () => Record<string, ContainerState>
+  inspectContainers: () => Awaitable<Record<string, ContainerState>>
   now: () => number
   sleep: (milliseconds: number) => Promise<void>
 }
 
 export type StartRuntime = WaitDependencies & {
-  startStack: () => void
-  validateStatus: () => void
+  startStack: () => Awaitable<void>
+  validateStatus: () => Awaitable<void>
   probeEndpoints: () => Promise<void>
-  stopStack: () => void
+  stopStack: () => Awaitable<void>
 }
 
 type WaitOptions = {
@@ -41,6 +44,12 @@ type WaitOptions = {
 }
 
 const START_FAILURE = "Local Supabase startup failed"
+export const COMMAND_TIMEOUTS = {
+  start: 10 * 60 * 1000,
+  inspect: 10_000,
+  status: 30_000,
+  stop: 60_000,
+} as const
 const DEFAULT_WAIT_OPTIONS: WaitOptions = {
   timeoutMs: 5 * 60 * 1000,
   pollIntervalMs: 2_000,
@@ -87,7 +96,7 @@ export async function waitForRequiredContainers(
   const deadline = dependencies.now() + options.timeoutMs
 
   while (true) {
-    if (areRequiredContainersReady(dependencies.inspectContainers())) {
+    if (areRequiredContainersReady(await dependencies.inspectContainers())) {
       return
     }
     if (dependencies.now() >= deadline) {
@@ -155,13 +164,13 @@ export async function runStartWorkflow(
   options: WaitOptions = DEFAULT_WAIT_OPTIONS,
 ): Promise<void> {
   try {
-    runtime.startStack()
+    await runtime.startStack()
     await waitForRequiredContainers(runtime, options)
-    runtime.validateStatus()
+    await runtime.validateStatus()
     await runtime.probeEndpoints()
   } catch (error) {
     try {
-      runtime.stopStack()
+      await runtime.stopStack()
     } catch {
       // Cleanup is best-effort; the outward error remains fixed and credential-free.
     }
@@ -170,47 +179,187 @@ export async function runStartWorkflow(
   }
 }
 
-function quietExec(command: string, args: readonly string[]): string {
-  return execFileSync(command, [...args], {
-    encoding: "utf8",
-    maxBuffer: 16 * 1024 * 1024,
-    stdio: ["ignore", "pipe", "pipe"],
+interface SpawnedCommand {
+  pid?: number
+  stdout: Pick<Readable, "destroy" | "on">
+  stderr: Pick<Readable, "destroy" | "resume">
+  once(event: "error", listener: (error: Error) => void): unknown
+  once(
+    event: "close",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): unknown
+  kill: (signal: NodeJS.Signals) => boolean
+}
+
+type SpawnCommand = (
+  command: string,
+  args: string[],
+  options: {
+    detached: true
+    stdio: ["ignore", "pipe", "pipe"]
+  },
+) => SpawnedCommand
+
+export type BoundedCommandRuntime = {
+  spawnCommand: SpawnCommand
+  killProcessGroup: (processId: number, signal: NodeJS.Signals) => void
+  setTimer: (callback: () => void, milliseconds: number) => unknown
+  clearTimer: (handle: unknown) => void
+}
+
+const realCommandRuntime: BoundedCommandRuntime = {
+  spawnCommand(command, args, options) {
+    return spawn(command, args, options) as SpawnedCommand
+  },
+  killProcessGroup(processId, signal) {
+    process.kill(-processId, signal)
+  },
+  setTimer(callback, milliseconds) {
+    return setTimeout(callback, milliseconds)
+  },
+  clearTimer(handle) {
+    clearTimeout(handle as ReturnType<typeof setTimeout>)
+  },
+}
+
+export async function executeBoundedCommand(
+  command: string,
+  args: readonly string[],
+  timeout: number,
+  runtime: BoundedCommandRuntime = realCommandRuntime,
+): Promise<string> {
+  if (!Number.isFinite(timeout) || timeout <= 0) {
+    throw new Error(START_FAILURE)
+  }
+
+  let child: SpawnedCommand
+  try {
+    child = runtime.spawnCommand(command, [...args], {
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+  } catch {
+    throw new Error(START_FAILURE)
+  }
+
+  return new Promise<string>((resolveCommand, rejectCommand) => {
+    const chunks: Buffer[] = []
+    let outputBytes = 0
+    let settled = false
+    const timer = { handle: undefined as unknown }
+
+    const clearCommandTimer = () => {
+      if (timer.handle !== undefined) runtime.clearTimer(timer.handle)
+    }
+    const finishWithFailure = () => {
+      if (settled) return
+      settled = true
+      clearCommandTimer()
+      child.stdout.destroy()
+      child.stderr.destroy()
+      rejectCommand(new Error(START_FAILURE))
+    }
+    const terminateProcessGroup = () => {
+      if (child.pid === undefined) {
+        try {
+          child.kill("SIGKILL")
+        } catch {
+          // The process may have exited between the timeout and termination.
+        }
+        return
+      }
+      try {
+        runtime.killProcessGroup(child.pid, "SIGKILL")
+      } catch {
+        try {
+          child.kill("SIGKILL")
+        } catch {
+          // The process group may already be gone.
+        }
+      }
+    }
+
+    child.stdout.on("data", (chunk: Buffer | string) => {
+      if (settled) return
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      outputBytes += buffer.length
+      if (outputBytes > 16 * 1024 * 1024) {
+        terminateProcessGroup()
+        finishWithFailure()
+        return
+      }
+      chunks.push(buffer)
+    })
+    child.stderr.resume()
+    child.once("error", finishWithFailure)
+    child.once("close", (code: number | null) => {
+      if (settled) return
+      settled = true
+      clearCommandTimer()
+      if (code !== 0) {
+        rejectCommand(new Error(START_FAILURE))
+        return
+      }
+      resolveCommand(Buffer.concat(chunks).toString("utf8"))
+    })
+
+    timer.handle = runtime.setTimer(() => {
+      terminateProcessGroup()
+      finishWithFailure()
+    }, timeout)
   })
 }
 
 const realRuntime: StartRuntime = {
-  startStack() {
-    quietExec("npx", ["supabase", "start", "--ignore-health-check", "--exclude", "edge-runtime,imgproxy"])
+  async startStack() {
+    await executeBoundedCommand(
+      "npx",
+      ["supabase", "start", "--ignore-health-check", "--exclude", "edge-runtime,imgproxy"],
+      COMMAND_TIMEOUTS.start,
+    )
   },
 
-  inspectContainers() {
-    const states: Record<string, ContainerState> = {}
-    for (const name of REQUIRED_CONTAINERS) {
-      try {
-        const output = quietExec("docker", [
-          "inspect",
-          "--format",
-          '{{json .State}}\t{{json (index .Config.Labels "com.supabase.cli.project")}}',
-          name,
-        ])
-        states[name] = parseContainerState(output.trim())
-      } catch {
-        // A container can be absent briefly while the CLI creates the stack.
-      }
-    }
-    return states
+  async inspectContainers() {
+    const inspected = await Promise.all(
+      REQUIRED_CONTAINERS.map(async (name) => {
+        try {
+          const output = await executeBoundedCommand(
+            "docker",
+            [
+              "inspect",
+              "--format",
+              '{{json .State}}\t{{json (index .Config.Labels "com.supabase.cli.project")}}',
+              name,
+            ],
+            COMMAND_TIMEOUTS.inspect,
+          )
+          return [name, parseContainerState(output.trim())] as const
+        } catch {
+          return null
+        }
+      }),
+    )
+    return Object.fromEntries(inspected.filter((entry) => entry !== null))
   },
 
-  validateStatus() {
-    quietExec("npx", ["supabase", "status", "-o", "json"])
+  async validateStatus() {
+    await executeBoundedCommand(
+      "npx",
+      ["supabase", "status", "-o", "json"],
+      COMMAND_TIMEOUTS.status,
+    )
   },
 
   probeEndpoints() {
     return probeLocalEndpoints()
   },
 
-  stopStack() {
-    quietExec("npx", ["supabase", "stop", "--project-id", "axsys-local"])
+  async stopStack() {
+    await executeBoundedCommand(
+      "npx",
+      ["supabase", "stop", "--project-id", "axsys-local"],
+      COMMAND_TIMEOUTS.stop,
+    )
   },
 
   now: Date.now,

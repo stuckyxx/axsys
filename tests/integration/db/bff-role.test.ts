@@ -1,6 +1,7 @@
 import { loadEnvFile } from "node:process"
 import postgres from "postgres"
 import { afterAll, describe, expect, it } from "vitest"
+import { hardenLocalPublicPrivileges } from "../../../scripts/provision-local-env"
 
 if (!process.env.BFF_DATABASE_URL) {
   try {
@@ -11,14 +12,22 @@ if (!process.env.BFF_DATABASE_URL) {
 }
 
 const databaseUrl = process.env.BFF_DATABASE_URL
-if (!databaseUrl) {
+const adminDatabaseUrl = process.env.DATABASE_URL
+if (!databaseUrl || !adminDatabaseUrl) {
   throw new Error("BFF integration environment is not provisioned")
 }
 
 const sql = postgres(databaseUrl, { max: 1, prepare: false })
+const postgresOwnerSql = postgres(adminDatabaseUrl, { max: 1, prepare: false })
+const supabaseAdminUrl = new URL(adminDatabaseUrl)
+supabaseAdminUrl.username = "supabase_admin"
+const supabaseAdminOwnerSql = postgres(supabaseAdminUrl.toString(), {
+  max: 1,
+  prepare: false,
+})
 
 afterAll(async () => {
-  await sql.end()
+  await Promise.all([sql.end(), postgresOwnerSql.end(), supabaseAdminOwnerSql.end()])
 })
 
 describe("axsys_bff", () => {
@@ -73,6 +82,175 @@ describe("axsys_bff", () => {
     `
 
     expect(memberships.count).toBe(0)
+  })
+
+  it("is granted only to trusted administrative members", async () => {
+    const members = await sql<{ member: string }[]>`
+      select member_role.rolname as member
+      from pg_auth_members membership
+      join pg_roles member_role on member_role.oid = membership.member
+      where membership.roleid = (select oid from pg_roles where rolname = current_user)
+      order by member_role.rolname
+    `
+
+    expect(members.length).toBeGreaterThan(0)
+    expect(
+      members.every(({ member }) => ["postgres", "supabase_admin"].includes(member)),
+    ).toBe(true)
+  })
+
+  it("has no future public object grants for API bearer roles", async () => {
+    const [unexpected] = await sql<[{ count: number }]>`
+      select count(*)::integer as count
+      from pg_default_acl defaults
+      cross join lateral aclexplode(defaults.defaclacl) grant_item
+      join pg_roles owner_role on owner_role.oid = defaults.defaclrole
+      join pg_roles grantee_role on grantee_role.oid = grant_item.grantee
+      where defaults.defaclnamespace in (0, 'public'::regnamespace)
+        and owner_role.rolname in ('postgres', 'supabase_admin')
+        and grantee_role.rolname in ('anon', 'authenticated', 'service_role')
+        and defaults.defaclobjtype in ('r', 'S', 'f')
+    `
+
+    expect(unexpected.count).toBe(0)
+
+    const globalFunctionDefaults = await sql<{ owner: string }[]>`
+      select owner_role.rolname as owner
+      from pg_default_acl defaults
+      join pg_roles owner_role on owner_role.oid = defaults.defaclrole
+      where defaults.defaclnamespace = 0
+        and owner_role.rolname in ('postgres', 'supabase_admin')
+        and defaults.defaclobjtype = 'f'
+        and not exists (
+          select 1
+          from aclexplode(defaults.defaclacl) grant_item
+          where grant_item.grantee = 0
+        )
+      order by owner_role.rolname
+    `
+    expect(globalFunctionDefaults.map(({ owner }) => owner)).toEqual([
+      "postgres",
+      "supabase_admin",
+    ])
+  })
+
+  it("denies future public object privileges for every application role under both owners", async () => {
+    for (const [owner, ownerSql] of [
+      ["postgres", postgresOwnerSql],
+      ["supabase_admin", supabaseAdminOwnerSql],
+    ] as const) {
+      await ownerSql.begin(async (transaction) => {
+        await transaction.unsafe(`
+          create table public.axsys_default_acl_probe_table(id bigint);
+          create sequence public.axsys_default_acl_probe_sequence;
+          create function public.axsys_default_acl_probe()
+          returns integer
+          language sql
+          as 'select 1'
+        `)
+        try {
+          const privileges = await transaction<
+            {
+              roleName: string
+              canUseTable: boolean
+              canUseSequence: boolean
+              canExecute: boolean
+              owner: string
+            }[]
+          >`
+            select
+              role_name as "roleName",
+              has_table_privilege(
+                role_name,
+                'public.axsys_default_acl_probe_table',
+                'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+              ) as "canUseTable",
+              has_sequence_privilege(
+                role_name,
+                'public.axsys_default_acl_probe_sequence',
+                'USAGE,SELECT,UPDATE'
+              ) as "canUseSequence",
+              has_function_privilege(
+                role_name,
+                'public.axsys_default_acl_probe()',
+                'EXECUTE'
+              ) as "canExecute",
+              current_user as owner
+            from unnest(array['anon', 'authenticated', 'service_role', 'axsys_bff']) role_name
+            order by role_name
+          `
+
+          expect(
+            privileges.every(
+              ({ canUseTable, canUseSequence, canExecute }) =>
+                !canUseTable && !canUseSequence && !canExecute,
+            ),
+          ).toBe(true)
+          expect(new Set(privileges.map(({ owner: actualOwner }) => actualOwner))).toEqual(
+            new Set([owner]),
+          )
+        } finally {
+          await transaction.unsafe(
+            `
+              drop function if exists public.axsys_default_acl_probe();
+              drop sequence if exists public.axsys_default_acl_probe_sequence;
+              drop table if exists public.axsys_default_acl_probe_table;
+            `,
+          )
+        }
+      })
+    }
+  })
+
+  it("preserves an explicitly allowlisted private BFF function during db:env hardening", async () => {
+    const [schemaState] = await supabaseAdminOwnerSql<[{ existed: boolean }]>`
+      select to_regnamespace('private') is not null as existed
+    `
+    if (!schemaState.existed) {
+      await supabaseAdminOwnerSql`create schema private authorization supabase_admin`
+    }
+
+    try {
+      await supabaseAdminOwnerSql.unsafe(`
+        create function private.axsys_explicit_bff_probe()
+        returns integer
+        language sql
+        as 'select 1';
+        revoke all privileges on function private.axsys_explicit_bff_probe()
+          from public, anon, authenticated, service_role;
+        grant execute on function private.axsys_explicit_bff_probe() to axsys_bff;
+      `)
+
+      await hardenLocalPublicPrivileges(supabaseAdminUrl.toString())
+
+      const privileges = await supabaseAdminOwnerSql<
+        { roleName: string; canExecute: boolean }[]
+      >`
+        select
+          role_name as "roleName",
+          has_function_privilege(
+            role_name,
+            'private.axsys_explicit_bff_probe()',
+            'EXECUTE'
+          ) as "canExecute"
+        from unnest(array['anon', 'authenticated', 'service_role', 'axsys_bff']) role_name
+        order by role_name
+      `
+
+      expect(privileges).toEqual([
+        { roleName: "anon", canExecute: false },
+        { roleName: "authenticated", canExecute: false },
+        { roleName: "axsys_bff", canExecute: true },
+        { roleName: "service_role", canExecute: false },
+      ])
+    } finally {
+      await supabaseAdminOwnerSql.unsafe(
+        "drop function if exists private.axsys_explicit_bff_probe()",
+      )
+      if (!schemaState.existed) {
+        await supabaseAdminOwnerSql`drop schema if exists private`
+      }
+    }
   })
 
   it("has no effective privileges on the public schema", async () => {
