@@ -202,6 +202,127 @@ describe("axsys_bff", () => {
     }
   })
 
+  it("repairs global and public-schema PUBLIC default ACL drift for every object type and owner", async () => {
+    const owners = [
+      ["postgres", postgresOwnerSql],
+      ["supabase_admin", supabaseAdminOwnerSql],
+    ] as const
+
+    try {
+      for (const [owner, ownerSql] of owners) {
+        await ownerSql.unsafe(`
+          alter default privileges for role ${owner}
+            grant all privileges on tables to public;
+          alter default privileges for role ${owner} in schema public
+            grant all privileges on tables to public;
+          alter default privileges for role ${owner}
+            grant all privileges on sequences to public;
+          alter default privileges for role ${owner} in schema public
+            grant all privileges on sequences to public;
+          alter default privileges for role ${owner}
+            grant all privileges on functions to public;
+          alter default privileges for role ${owner} in schema public
+            grant all privileges on functions to public;
+        `)
+      }
+
+      await hardenLocalPublicPrivileges(supabaseAdminUrl.toString())
+
+      const [remainingPublicDefaults] = await supabaseAdminOwnerSql<
+        [{ count: number }]
+      >`
+        select count(*)::integer as count
+        from pg_default_acl defaults
+        cross join lateral aclexplode(defaults.defaclacl) grant_item
+        join pg_roles owner_role on owner_role.oid = defaults.defaclrole
+        where defaults.defaclnamespace in (0, 'public'::regnamespace)
+          and owner_role.rolname in ('postgres', 'supabase_admin')
+          and defaults.defaclobjtype in ('r', 'S', 'f')
+          and grant_item.grantee = 0
+      `
+      expect(remainingPublicDefaults.count).toBe(0)
+
+      for (const [owner, ownerSql] of owners) {
+        await ownerSql.begin(async (transaction) => {
+          await transaction.unsafe(`
+            create table public.axsys_public_drift_probe_table(id bigint);
+            create sequence public.axsys_public_drift_probe_sequence;
+            create function public.axsys_public_drift_probe()
+            returns integer
+            language sql
+            as 'select 1';
+          `)
+          try {
+            const privileges = await transaction<
+              {
+                roleName: string
+                canUseTable: boolean
+                canUseSequence: boolean
+                canExecute: boolean
+                owner: string
+              }[]
+            >`
+              select
+                role_name as "roleName",
+                has_table_privilege(
+                  role_name,
+                  'public.axsys_public_drift_probe_table',
+                  'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+                ) as "canUseTable",
+                has_sequence_privilege(
+                  role_name,
+                  'public.axsys_public_drift_probe_sequence',
+                  'USAGE,SELECT,UPDATE'
+                ) as "canUseSequence",
+                has_function_privilege(
+                  role_name,
+                  'public.axsys_public_drift_probe()',
+                  'EXECUTE'
+                ) as "canExecute",
+                current_user as owner
+              from unnest(array['anon', 'authenticated', 'service_role', 'axsys_bff']) role_name
+              order by role_name
+            `
+
+            expect(
+              privileges.every(
+                ({ canUseTable, canUseSequence, canExecute }) =>
+                  !canUseTable && !canUseSequence && !canExecute,
+              ),
+            ).toBe(true)
+            expect(new Set(privileges.map(({ owner: actualOwner }) => actualOwner))).toEqual(
+              new Set([owner]),
+            )
+          } finally {
+            await transaction.unsafe(`
+              drop function if exists public.axsys_public_drift_probe();
+              drop sequence if exists public.axsys_public_drift_probe_sequence;
+              drop table if exists public.axsys_public_drift_probe_table;
+            `)
+          }
+        })
+      }
+    } finally {
+      for (const [owner, ownerSql] of owners) {
+        await ownerSql.unsafe(`
+          alter default privileges for role ${owner}
+            revoke all privileges on tables from public;
+          alter default privileges for role ${owner} in schema public
+            revoke all privileges on tables from public;
+          alter default privileges for role ${owner}
+            revoke all privileges on sequences from public;
+          alter default privileges for role ${owner} in schema public
+            revoke all privileges on sequences from public;
+          alter default privileges for role ${owner}
+            revoke all privileges on functions from public;
+          alter default privileges for role ${owner} in schema public
+            revoke all privileges on functions from public;
+        `)
+      }
+      await hardenLocalPublicPrivileges(supabaseAdminUrl.toString())
+    }
+  })
+
   it("preserves an explicitly allowlisted private BFF function during db:env hardening", async () => {
     const [schemaState] = await supabaseAdminOwnerSql<[{ existed: boolean }]>`
       select to_regnamespace('private') is not null as existed

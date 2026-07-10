@@ -75,31 +75,45 @@ describe("Supabase custom role bootstrap", () => {
           ),
         )
       }
+
+      expect(rolesSource).toMatch(
+        new RegExp(
+          `alter default privileges for role postgres in schema public\\s+revoke all privileges on ${objectType} from public;`,
+          "u",
+        ),
+      )
+      expect(rolesSource).toMatch(
+        new RegExp(
+          `alter default privileges for role postgres\\s+revoke all privileges on ${objectType} from public;`,
+          "u",
+        ),
+      )
+      for (const owner of ["postgres", "supabase_admin"] as const) {
+        expect(provisionerSource).toMatch(
+          new RegExp(
+            `alter default privileges for role ${owner} in schema public\\s+revoke all privileges on ${objectType} from public;`,
+            "u",
+          ),
+        )
+        expect(provisionerSource).toMatch(
+          new RegExp(
+            `alter default privileges for role ${owner}\\s+revoke all privileges on ${objectType} from public;`,
+            "u",
+          ),
+        )
+      }
     }
 
     expect(rolesSource).not.toContain("set role supabase_admin")
-    expect(rolesSource).toMatch(
-      /alter default privileges for role postgres\s+revoke all privileges on functions from public;/u,
-    )
     expect(provisionerSource).toContain('url.username = "supabase_admin"')
-    for (const owner of ["postgres", "supabase_admin"] as const) {
-      expect(provisionerSource).toMatch(
-        new RegExp(
-          `alter default privileges for role ${owner}\\s+revoke all privileges on functions from public;`,
-          "u",
-        ),
-      )
-      expect(provisionerSource).toMatch(
-        new RegExp(
-          `alter default privileges for role ${owner} in schema public\\s+revoke all privileges on functions from public;`,
-          "u",
-        ),
-      )
-    }
-    expect(provisionerSource).toContain("defaults.defaclnamespace = 0")
+    expect(rolesSource).toMatch(
+      /defaults\.defaclnamespace in \(0, 'public'::regnamespace\)[\s\S]*?defaults\.defaclobjtype in \('r', 'S', 'f'\)[\s\S]*?grant_item\.grantee = 0/u,
+    )
+    expect(provisionerSource).toMatch(
+      /defaults\.defaclnamespace in \(0, 'public'::regnamespace\)[\s\S]*?defaults\.defaclobjtype in \('r', 'S', 'f'\)[\s\S]*?grant_item\.grantee = 0/u,
+    )
     expect(provisionerSource).toContain("from pg_default_acl")
     expect(provisionerSource).toContain("aclexplode")
-    expect(provisionerSource).toContain("grant_item.grantee = 0")
     const privateFunctionRevoke = provisionerSource.match(
       /revoke all privileges on all functions in schema private[\s\S]*?;/u,
     )?.[0]

@@ -45,7 +45,15 @@ alter default privileges for role postgres
 alter default privileges for role postgres
   revoke all privileges on functions from anon, authenticated, service_role;
 alter default privileges for role postgres in schema public
+  revoke all privileges on tables from public;
+alter default privileges for role postgres in schema public
+  revoke all privileges on sequences from public;
+alter default privileges for role postgres in schema public
   revoke all privileges on functions from public;
+alter default privileges for role postgres
+  revoke all privileges on tables from public;
+alter default privileges for role postgres
+  revoke all privileges on sequences from public;
 alter default privileges for role postgres
   revoke all privileges on functions from public;
 reset role;
@@ -123,12 +131,12 @@ begin
     from pg_default_acl defaults
     cross join lateral aclexplode(defaults.defaclacl) grant_item
     join pg_roles owner_role on owner_role.oid = defaults.defaclrole
-    where defaults.defaclnamespace = 'public'::regnamespace
+    where defaults.defaclnamespace in (0, 'public'::regnamespace)
       and owner_role.rolname = 'postgres'
-      and defaults.defaclobjtype = 'f'
+      and defaults.defaclobjtype in ('r', 'S', 'f')
       and grant_item.grantee = 0
   ) then
-    raise exception 'public default ACL assertion failed: unexpected PUBLIC function grant';
+    raise exception 'public default ACL assertion failed: unexpected PUBLIC object grant';
   end if;
 
   if not exists (
