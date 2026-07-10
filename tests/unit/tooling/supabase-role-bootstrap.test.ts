@@ -38,12 +38,14 @@ describe("Supabase custom role bootstrap", () => {
     expect(usageGrant).not.toContain("axsys_bff")
   })
 
-  it("revokes existing and future public object grants from API bearer roles for both owners", () => {
+  it("revokes existing API grants and future API/BFF grants for both owners", () => {
     const rolesSource = readFileSync(resolve("supabase/roles.sql"), "utf8")
     const provisionerSource = readFileSync(
       resolve("scripts/provision-local-env.ts"),
       "utf8",
     )
+    const defaultAclGrantees =
+      "anon, authenticated, service_role, axsys_bff"
 
     for (const objectType of ["tables", "sequences", "functions"] as const) {
       expect(rolesSource).toContain(
@@ -51,26 +53,26 @@ describe("Supabase custom role bootstrap", () => {
       )
       expect(rolesSource).toMatch(
         new RegExp(
-          `alter default privileges for role postgres in schema public\\s+revoke all privileges on ${objectType} from anon, authenticated, service_role;`,
+          `alter default privileges for role postgres in schema public\\s+revoke all privileges on ${objectType} from ${defaultAclGrantees};`,
           "u",
         ),
       )
       expect(rolesSource).toMatch(
         new RegExp(
-          `alter default privileges for role postgres\\s+revoke all privileges on ${objectType} from anon, authenticated, service_role;`,
+          `alter default privileges for role postgres\\s+revoke all privileges on ${objectType} from ${defaultAclGrantees};`,
           "u",
         ),
       )
       expect(provisionerSource).toMatch(
         new RegExp(
-          `alter default privileges for role supabase_admin in schema public\\s+revoke all privileges on ${objectType} from anon, authenticated, service_role;`,
+          `alter default privileges for role supabase_admin in schema public\\s+revoke all privileges on ${objectType} from ${defaultAclGrantees};`,
           "u",
         ),
       )
       for (const owner of ["postgres", "supabase_admin"] as const) {
         expect(provisionerSource).toMatch(
           new RegExp(
-            `alter default privileges for role ${owner}\\s+revoke all privileges on ${objectType} from anon, authenticated, service_role;`,
+            `alter default privileges for role ${owner}\\s+revoke all privileges on ${objectType} from ${defaultAclGrantees};`,
             "u",
           ),
         )
@@ -107,6 +109,12 @@ describe("Supabase custom role bootstrap", () => {
     expect(rolesSource).not.toContain("set role supabase_admin")
     expect(provisionerSource).toContain('url.username = "supabase_admin"')
     expect(rolesSource).toMatch(
+      /grantee_role\.rolname in \('anon', 'authenticated', 'service_role', 'axsys_bff'\)/u,
+    )
+    expect(provisionerSource).toMatch(
+      /grantee_role\.rolname in \('anon', 'authenticated', 'service_role', 'axsys_bff'\)/u,
+    )
+    expect(rolesSource).toMatch(
       /defaults\.defaclnamespace in \(0, 'public'::regnamespace\)[\s\S]*?defaults\.defaclobjtype in \('r', 'S', 'f'\)[\s\S]*?grant_item\.grantee = 0/u,
     )
     expect(provisionerSource).toMatch(
@@ -128,6 +136,12 @@ describe("Supabase custom role bootstrap", () => {
     }
     expect(repeatableHardeningSql).toContain(
       "revoke all privileges on all functions in schema public from axsys_bff;",
+    )
+    expect(repeatableHardeningSql).not.toContain(
+      "revoke all privileges on all tables in schema public from axsys_bff;",
+    )
+    expect(repeatableHardeningSql).not.toContain(
+      "revoke all privileges on all sequences in schema public from axsys_bff;",
     )
     const privateFunctionRevoke = provisionerSource.match(
       /revoke all privileges on all functions in schema private[\s\S]*?;/u,

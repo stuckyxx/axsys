@@ -33,17 +33,17 @@ revoke all privileges on all functions in schema public from anon, authenticated
 
 set role postgres;
 alter default privileges for role postgres in schema public
-  revoke all privileges on tables from anon, authenticated, service_role;
+  revoke all privileges on tables from anon, authenticated, service_role, axsys_bff;
 alter default privileges for role postgres in schema public
-  revoke all privileges on sequences from anon, authenticated, service_role;
+  revoke all privileges on sequences from anon, authenticated, service_role, axsys_bff;
 alter default privileges for role postgres in schema public
-  revoke all privileges on functions from anon, authenticated, service_role;
+  revoke all privileges on functions from anon, authenticated, service_role, axsys_bff;
 alter default privileges for role postgres
-  revoke all privileges on tables from anon, authenticated, service_role;
+  revoke all privileges on tables from anon, authenticated, service_role, axsys_bff;
 alter default privileges for role postgres
-  revoke all privileges on sequences from anon, authenticated, service_role;
+  revoke all privileges on sequences from anon, authenticated, service_role, axsys_bff;
 alter default privileges for role postgres
-  revoke all privileges on functions from anon, authenticated, service_role;
+  revoke all privileges on functions from anon, authenticated, service_role, axsys_bff;
 alter default privileges for role postgres in schema public
   revoke all privileges on tables from public;
 alter default privileges for role postgres in schema public
@@ -120,7 +120,7 @@ begin
     join pg_roles grantee_role on grantee_role.oid = grant_item.grantee
     where defaults.defaclnamespace in (0, 'public'::regnamespace)
       and owner_role.rolname = 'postgres'
-      and grantee_role.rolname in ('anon', 'authenticated', 'service_role')
+      and grantee_role.rolname in ('anon', 'authenticated', 'service_role', 'axsys_bff')
       and defaults.defaclobjtype in ('r', 'S', 'f')
   ) then
     raise exception 'public default ACL assertion failed: unexpected API role grant';
