@@ -1385,6 +1385,12 @@ type CreateUploadIntentInput = {
   correlationId: string
 }
 
+type UploadReservationDTO = Readonly<{
+  intentId: string
+  quarantinePath: string
+  declaredSize: number
+}>
+
 type UploadHandshake = {
   intentId: string
   endpoint: string
@@ -1398,7 +1404,9 @@ type UploadHandshake = {
 }
 ```
 
-Valide policy antes de tocar Storage. Para os três purposes deste plano, chame `bffDb.reserveImageUploadIntent` com apenas session/actor verificados, purpose e metadados declarados; a função deriva company/user, aplica sob o mesmo quota lock os limites por usuário, gera `intentId`, random ID e path exato `${companyId}/${userId}/${intentId}/${randomId}`, mantém status `reserved` e segura `2 * declared_size`. Somente depois use `getAdminSupabase().storage.from('axsys-quarantine').createSignedUploadUrl(path, { upsert: false })`, e então chame `bffDb.activateFileUploadAuthorization`: ela faz CAS `reserved -> issued`, fixa `authorization_issued_at`, `upload_authorization_expires_at=issued_at+2h` e `cleanup_not_before=upload_authorization_expires_at+24h15m`, retornando os dois deadlines do handshake. Se assinatura ou ativação falhar antes de responder, `bffDb.cancelUnissuedFileReservation` exige status reserved, marca cancelled e libera tudo; se a ativação comitou mas a resposta caiu, o cleaner conserva a capacidade até a aposentadoria segura. Depois que o token pode ter saído, cancelamento/abandono nunca libera quota antes de `cleanup_not_before`. O cliente Supabase do usuário nunca insere intent, e o browser nunca determina um componente do path.
+Exporte `UploadReservationDTO` uma única vez de `src/modules/files/domain/file-types.ts`; `create-upload-intent.ts`, `bffDb` e os Planos 03–05 importam esse tipo em vez de redeclará-lo. Ele é o único retorno permitido para `reserve_image_upload_intent` e para todas as fachadas de reserva purpose-specific. O JSON SQL contém exatamente `intentId`, `quarantinePath` e `declaredSize`; não contém company, actor, target, bucket, token, deadline, status ou quota. O bucket é a constante server-only `axsys-quarantine`, e policy fornece `maxBytes`/MIMEs sem ampliar o DTO.
+
+Valide policy antes de tocar Storage. Para os três purposes deste plano, chame `bffDb.reserveImageUploadIntent` com apenas session/actor verificados, purpose e metadados declarados; a função deriva company/user, aplica sob o mesmo quota lock os limites por usuário, gera `intentId`, random ID e path exato `${companyId}/${userId}/${intentId}/${randomId}`, mantém status `reserved` e segura `2 * declared_size`, retornando exatamente `UploadReservationDTO`. Somente depois use `getAdminSupabase().storage.from('axsys-quarantine').createSignedUploadUrl(quarantinePath, { upsert: false })`, e então chame `bffDb.activateFileUploadAuthorization`: ela faz CAS `reserved -> issued`, fixa `authorization_issued_at`, `upload_authorization_expires_at=issued_at+2h` e `cleanup_not_before=upload_authorization_expires_at+24h15m`, retornando exatamente `{uploadAuthorizationExpiresAt,finalizeBefore}`. Se assinatura ou ativação falhar antes de responder, `bffDb.cancelUnissuedFileReservation` exige status reserved, marca cancelled e libera tudo; se a ativação comitou mas a resposta caiu, o cleaner conserva a capacidade até a aposentadoria segura. Depois que o token pode ter saído, cancelamento/abandono nunca libera quota antes de `cleanup_not_before`. O cliente Supabase do usuário nunca insere intent, e o browser nunca determina um componente do path. Testes de contrato fazem igualdade recursiva das chaves desses dois retornos e rejeitam campos extras.
 
 - [ ] **Step 7: Implementar finalize como máquina de estados compensável**
 

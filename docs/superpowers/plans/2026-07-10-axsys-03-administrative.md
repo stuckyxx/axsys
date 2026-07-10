@@ -109,11 +109,11 @@ Expected: the first command prints a timestamped path ending in _administrative_
 - Create: src/modules/documents/server/proposal-pdf-template.tsx
 - Create: src/modules/documents/server/proposal-pdf-service.ts
 - Create: src/modules/documents/server/generated-document-repository.ts
-- Modify: src/lib/db/bff.ts
 - Create via CLI: migration with suffix `_proposal_document_writer.sql`
 
 ### Contracts and attachments
 
+- Create: src/modules/contracts/domain/contract-types.ts
 - Create: src/modules/contracts/domain/contract-lifecycle.ts
 - Create: src/modules/contracts/domain/contract-cursor.ts
 - Create: src/modules/contracts/schemas/contract-input.ts
@@ -434,6 +434,7 @@ Expected: the commit includes the CLI-generated migration path and no manually t
 
 **Files:**
 - Create through CLI: generated migration ending in _administrative_proposals.sql
+- Modify: supabase/tests/database/03_administrative_schema.test.sql
 - Create: supabase/tests/database/03_administrative_numbering.test.sql
 - Modify: src/lib/supabase/database.types.ts
 
@@ -592,7 +593,7 @@ Add this schema to `$PROPOSALS_MIGRATION`:
 
 - [ ] **Step 6: Add transactional number assignment and total confirmation**
 
-Append owner-only helpers with fixed empty search paths. `private.next_proposal_number(company_id)` is callable only by the migration owner and atomically uses `INSERT ... ON CONFLICT DO UPDATE ... RETURNING` on the tenant counter. It performs no authorization itself and is called only after the restricted writer has verified actor, registered active session, membership, module, company/client/catalog relationships, and exact item shape. Revoke it from public, anon, authenticated, service_role, and axsys_bff; do not install a numbering trigger or any public/authenticated creation function.
+Append owner-only helpers with fixed empty search paths. `private.next_proposal_number(p_company_id uuid) returns bigint` is callable only by the migration owner and atomically uses `INSERT ... ON CONFLICT DO UPDATE ... RETURNING` on the tenant counter. It performs no authorization itself and is called only after the restricted writer has verified actor, registered active session, membership, module, company/client/catalog relationships, and exact item shape. Revoke it from public, anon, authenticated, service_role, and axsys_bff; do not install a numbering trigger or any public/authenticated creation function.
 
     create or replace function private.refresh_proposal_total()
     returns trigger
@@ -620,7 +621,7 @@ Append owner-only helpers with fixed empty search paths. `private.next_proposal_
       after insert or update or delete on public.proposal_items
       for each row execute function private.refresh_proposal_total();
 
-Create `private.create_proposal(p_actor_id uuid, p_session_id uuid, p_client_id uuid, p_segment text, p_issued_on date, p_items jsonb, p_correlation_id uuid)` as SECURITY DEFINER with an empty search path and EXECUTE only for `axsys_bff`. It validates the actor/session through the Plan 01 request-bound helper, derives `company_id` from the active membership (never from request JSON), requires the administrative module, enforces a non-empty bounded JSON array with exact keys/types, locks and verifies the client and every catalog item against the same company/segment/kind, obtains the next tenant number through `private.next_proposal_number`, inserts proposal/items, recomputes totals in PostgreSQL, writes the success audit and canonical invalidation scopes, and returns a typed proposal summary. Any failure rolls back rows, counter, audit, and outbox together. Revoke the function from public, anon, authenticated, and service_role; add source/catalog tests proving no `public.create_proposal` routine and no authenticated mutation grant exists.
+Create `private.create_proposal(p_actor_id uuid,p_session_id uuid,p_client_id uuid,p_segment text,p_issued_on date,p_items jsonb,p_correlation_id uuid)` as SECURITY DEFINER with an empty search path and EXECUTE only for `axsys_bff`. It validates the actor/session through the Plan 01 request-bound helper, derives `company_id` from the active membership (never from request JSON), requires the administrative module, enforces a non-empty bounded JSON array with exact keys/types, locks and verifies the client and every catalog item against the same company/segment/kind, obtains the next tenant number through `private.next_proposal_number`, inserts proposal/items, recomputes totals in PostgreSQL, writes the success audit and canonical invalidation scopes, and returns exactly the Task 5 object `{record:ProposalWithItemsMutationDTO,scopes:['proposals','dashboard']}`. Any failure rolls back rows, counter, audit, and outbox together. Revoke the function from public, anon, authenticated, and service_role; add source/catalog tests proving no `public.create_proposal` routine and no authenticated mutation grant exists.
 
 - [ ] **Step 7: Add immutable snapshots and legal status transitions**
 
@@ -891,6 +892,7 @@ Expected: one commit adds reusable document kinds and table; Plan 05 will add th
 - Create through CLI: generated migration ending in _administrative_rls.sql
 - Modify: src/lib/supabase/database.types.ts
 - Modify: src/lib/db/bff.ts
+- Create: src/modules/contracts/domain/contract-types.ts
 - Create: tests/contracts/administrative-bff-boundary.test.ts
 
 - [ ] **Step 1: Write the failing four-profile RLS fixture**
@@ -975,37 +977,67 @@ Use explicit SELECT policies only. The complete client policy is:
       on public.clients for select to authenticated
       using ((select private.has_module(company_id, 'administrative'::public.module_key)));
 
-Create equivalent SELECT-only policies for catalog_items, proposals, proposal_items, contracts and contract_attachments using the administrative module. For generated_documents, this plan's SELECT policy must require `kind='proposal'`, non-null proposal_id, and the administrative module; it must not expose payment_letter/payment_process rows. Plan 05 adds a separate financial-kind SELECT policy after payment_requests exists. Composite foreign keys remain mandatory defense in depth even after a policy passes.
+Create equivalent SELECT-only policies for catalog_items, proposals, proposal_items, contracts and contract_attachments using the administrative module. For generated_documents, this plan's only Data API SELECT policy must require `kind='proposal'`, non-null proposal_id, and the administrative module; it must not expose payment_letter/payment_process rows. Plan 05 keeps payment documents BFF-only and therefore adds neither an authenticated grant nor a financial-kind policy on this shared table. Composite foreign keys remain mandatory defense in depth even after a policy passes.
 
 In the same migration create fixed-empty-search-path SECURITY DEFINER functions with EXECUTE only for axsys_bff: `create_client`, `update_client`, `archive_client`, `restore_client`, `delete_client`, `create_catalog_item`, `update_catalog_item`, `archive_catalog_item`, `restore_catalog_item`, `delete_catalog_item`, `update_draft_proposal`, `delete_draft_proposal`, `save_proposal_items`, `transition_proposal_status`, `create_contract`, `update_contract`, `close_contract`, and `delete_contract`. Task 3's single `private.create_proposal` remains the only proposal creator; do not create a second alias. Each accepts actor+session, derives tenant from the locked target/verified membership, requires the administrative module, sets `app.actor_id` only after authorization, allowlists fields, derives creator/updater/status/company, applies expectedVersion CAS where applicable, enforces historical/delete rules and composite parents, writes exactly one safe success audit row, and returns canonical invalidation scopes in the same transaction. No function accepts trusted company/actor/role/status totals or arbitrary JSON; the proposal-item array is parsed against an exact SQL shape/count/size and totals are recomputed in PostgreSQL. Add typed bffDb methods plus catalog/source tests for every exact signature/grant, absence of aliases/public writers, route usage, and one audit/outbox on success or idempotent replay.
 
-Freeze this normative routine contract. `common` means `(p_actor_id uuid,p_session_id uuid,p_correlation_id uuid)`; every `p_input jsonb` is parsed with exact-key equality into the named Zod/SQL shape and bounded bytes, never merged dynamically. Every mutation returns one JSON object `{ record: <safe persisted DTO|null>, scopes: <frozen text[]> }`; no internal path/actor/security column is in `record`.
+Freeze the exact persisted projections below. These are definitions, not placeholders; SQL JSON construction and TypeScript decoding reject missing or extra keys recursively:
 
-| Routine | Arguments after common | Required return/scopes | Audit action |
+```ts
+type ClientMutationDTO = Readonly<{
+  id: string
+  legalName: string
+  tradeName: string | null
+  cnpj: string
+  segment: string
+  email: string | null
+  phone: string | null
+  address: Readonly<{ street: string | null; number: string | null; complement: string | null; neighborhood: string | null; municipality: string; state: string; postalCode: string | null }>
+  archivedAt: string | null
+  version: number
+  createdAt: string
+  updatedAt: string
+}>
+type CatalogItemMutationDTO = Readonly<{ id: string; itemKind: 'service' | 'product'; segment: string; name: string; description: string; archivedAt: string | null; version: number; createdAt: string; updatedAt: string }>
+type ProposalMutationDTO = Readonly<{ id: string; clientId: string; segment: string; number: number; issuedOn: string; status: ProposalStatus; total: Money; sentAt: string | null; version: number; createdAt: string; updatedAt: string }>
+type ProposalItemMutationDTO = Readonly<{ id: string; catalogItemId: string; itemKind: CatalogItemKind; position: number; description: string; months: number | null; monthlyAmount: Money | null; quantity: string | null; unitAmount: Money | null; lineTotal: Money }>
+type ProposalWithItemsMutationDTO = Readonly<{ proposal: ProposalMutationDTO; items: readonly ProposalItemMutationDTO[] }>
+type ContractMutationDTO = Readonly<{ id: string; clientId: string; number: string; object: string; startsOn: string; endsOn: string; amount: Money; closedAt: string | null; closeReason: string | null; version: number; createdAt: string; updatedAt: string }>
+type ContractAttachmentDTO = Readonly<{ id: string; contractId: string; fileObjectId: string; attachmentGroupId: string; version: number; originalName: string; mime: string; byteSize: number; isCurrent: boolean; createdAt: string }>
+```
+
+Export `ContractAttachmentDTO` from `src/modules/contracts/domain/contract-types.ts`; `bffDb`, the attachment service, route, and UI import that one definition. Do not redeclare or infer it from a raw table row.
+
+Every full signature orders actor and session first, domain arguments next, and `p_correlation_id uuid` last. Every `p_input jsonb` is parsed with exact-key equality into the named Zod/SQL shape and bounded bytes, never merged dynamically. Freeze this normative writer contract:
+
+| Routine | Exact full signature | Exact return | Audit action |
 |---|---|---|---|
-| `create_client` | `p_input jsonb(clientCreate)` | client; clients,proposals,contracts,dashboard | client.created |
-| `update_client` | `p_client_id uuid,p_expected_version bigint,p_input jsonb(clientUpdateFields)` | client; clients,proposals,contracts,dashboard | client.updated |
-| `archive_client` / `restore_client` | `p_client_id uuid,p_expected_version bigint` | client; clients,proposals,contracts,dashboard | client.archived/restored |
-| `delete_client` | `p_client_id uuid,p_expected_version bigint` | null; clients,proposals,contracts,dashboard | client.deleted |
-| `create_catalog_item` | `p_input jsonb(catalogCreate)` | catalog item; catalog,proposals | catalog.created |
-| `update_catalog_item` | `p_item_id uuid,p_expected_version bigint,p_input jsonb(catalogUpdateFields)` | catalog item; catalog,proposals | catalog.updated |
-| `archive_catalog_item` / `restore_catalog_item` | `p_item_id uuid,p_expected_version bigint` | catalog item; catalog,proposals | catalog.archived/restored |
-| `delete_catalog_item` | `p_item_id uuid,p_expected_version bigint` | null; catalog,proposals | catalog.deleted |
-| `create_proposal` | exact Task 3 actor/session/client/segment/date/items/correlation signature | proposal; proposals,dashboard | proposal.created |
-| `update_draft_proposal` | `p_proposal_id uuid,p_expected_version bigint,p_input jsonb(proposalHeaderUpdate)` | proposal; proposals,dashboard | proposal.updated |
-| `save_proposal_items` | `p_proposal_id uuid,p_expected_version bigint,p_items jsonb` | proposal+items+total; proposals,dashboard | proposal.items_saved |
-| `transition_proposal_status` | `p_proposal_id uuid,p_expected_version bigint,p_next_status proposal_status` | proposal; proposals,dashboard | proposal.status_changed |
-| `delete_draft_proposal` | `p_proposal_id uuid,p_expected_version bigint` | null; proposals,dashboard | proposal.deleted |
-| `create_contract` | `p_input jsonb(contractCreate)` | contract; contracts,notifications,dashboard | contract.created |
-| `update_contract` | `p_contract_id uuid,p_expected_version bigint,p_input jsonb(contractUpdateFields)` | contract; contracts,notifications,dashboard,payments | contract.updated |
-| `close_contract` | `p_contract_id uuid,p_expected_version bigint,p_reason text` | contract; contracts,notifications,dashboard,payments | contract.closed |
-| `delete_contract` | `p_contract_id uuid,p_expected_version bigint` | null; contracts,notifications,dashboard,payments | contract.deleted |
+| `create_client` | `(p_actor_id uuid,p_session_id uuid,p_input jsonb,p_correlation_id uuid)` | `{record:ClientMutationDTO,scopes:['clients','proposals','contracts','dashboard']}` | `client.created` |
+| `update_client` | `(p_actor_id uuid,p_session_id uuid,p_client_id uuid,p_expected_version bigint,p_input jsonb,p_correlation_id uuid)` | `{record:ClientMutationDTO,scopes:['clients','proposals','contracts','dashboard']}` | `client.updated` |
+| `archive_client` | `(p_actor_id uuid,p_session_id uuid,p_client_id uuid,p_expected_version bigint,p_correlation_id uuid)` | `{record:ClientMutationDTO,scopes:['clients','proposals','contracts','dashboard']}` | `client.archived` |
+| `restore_client` | `(p_actor_id uuid,p_session_id uuid,p_client_id uuid,p_expected_version bigint,p_correlation_id uuid)` | `{record:ClientMutationDTO,scopes:['clients','proposals','contracts','dashboard']}` | `client.restored` |
+| `delete_client` | `(p_actor_id uuid,p_session_id uuid,p_client_id uuid,p_expected_version bigint,p_correlation_id uuid)` | `{record:null,scopes:['clients','proposals','contracts','dashboard']}` | `client.deleted` |
+| `create_catalog_item` | `(p_actor_id uuid,p_session_id uuid,p_input jsonb,p_correlation_id uuid)` | `{record:CatalogItemMutationDTO,scopes:['catalog','proposals']}` | `catalog.created` |
+| `update_catalog_item` | `(p_actor_id uuid,p_session_id uuid,p_item_id uuid,p_expected_version bigint,p_input jsonb,p_correlation_id uuid)` | `{record:CatalogItemMutationDTO,scopes:['catalog','proposals']}` | `catalog.updated` |
+| `archive_catalog_item` | `(p_actor_id uuid,p_session_id uuid,p_item_id uuid,p_expected_version bigint,p_correlation_id uuid)` | `{record:CatalogItemMutationDTO,scopes:['catalog','proposals']}` | `catalog.archived` |
+| `restore_catalog_item` | `(p_actor_id uuid,p_session_id uuid,p_item_id uuid,p_expected_version bigint,p_correlation_id uuid)` | `{record:CatalogItemMutationDTO,scopes:['catalog','proposals']}` | `catalog.restored` |
+| `delete_catalog_item` | `(p_actor_id uuid,p_session_id uuid,p_item_id uuid,p_expected_version bigint,p_correlation_id uuid)` | `{record:null,scopes:['catalog','proposals']}` | `catalog.deleted` |
+| `create_proposal` | `(p_actor_id uuid,p_session_id uuid,p_client_id uuid,p_segment text,p_issued_on date,p_items jsonb,p_correlation_id uuid)` | `{record:ProposalWithItemsMutationDTO,scopes:['proposals','dashboard']}` | `proposal.created` |
+| `update_draft_proposal` | `(p_actor_id uuid,p_session_id uuid,p_proposal_id uuid,p_expected_version bigint,p_input jsonb,p_correlation_id uuid)` | `{record:ProposalMutationDTO,scopes:['proposals','dashboard']}` | `proposal.updated` |
+| `save_proposal_items` | `(p_actor_id uuid,p_session_id uuid,p_proposal_id uuid,p_expected_version bigint,p_items jsonb,p_correlation_id uuid)` | `{record:ProposalWithItemsMutationDTO,scopes:['proposals','dashboard']}` | `proposal.items_saved` |
+| `transition_proposal_status` | `(p_actor_id uuid,p_session_id uuid,p_proposal_id uuid,p_expected_version bigint,p_next_status public.proposal_status,p_correlation_id uuid)` | `{record:ProposalMutationDTO,scopes:['proposals','dashboard']}` | `proposal.status_changed` |
+| `delete_draft_proposal` | `(p_actor_id uuid,p_session_id uuid,p_proposal_id uuid,p_expected_version bigint,p_correlation_id uuid)` | `{record:null,scopes:['proposals','dashboard']}` | `proposal.deleted` |
+| `create_contract` | `(p_actor_id uuid,p_session_id uuid,p_input jsonb,p_correlation_id uuid)` | `{record:ContractMutationDTO,scopes:['contracts','notifications','dashboard']}` | `contract.created` |
+| `update_contract` | `(p_actor_id uuid,p_session_id uuid,p_contract_id uuid,p_expected_version bigint,p_input jsonb,p_correlation_id uuid)` | `{record:ContractMutationDTO,scopes:['contracts','notifications','dashboard','payments']}` | `contract.updated` |
+| `close_contract` | `(p_actor_id uuid,p_session_id uuid,p_contract_id uuid,p_expected_version bigint,p_reason text,p_correlation_id uuid)` | `{record:ContractMutationDTO,scopes:['contracts','notifications','dashboard','payments']}` | `contract.closed` |
+| `delete_contract` | `(p_actor_id uuid,p_session_id uuid,p_contract_id uuid,p_expected_version bigint,p_correlation_id uuid)` | `{record:null,scopes:['contracts','notifications','dashboard','payments']}` | `contract.deleted` |
+| `version_contract_attachment` | `(p_actor_id uuid,p_session_id uuid,p_contract_id uuid,p_file_id uuid,p_attachment_group_id uuid,p_correlation_id uuid)` | `{record:ContractAttachmentDTO,scopes:['contracts','storage']}` | `contract.attachment_versioned` |
 
-Catalog tests assert exact `to_regprocedure` signatures, SECURITY DEFINER/search_path, owner, `axsys_bff`-only EXECUTE, stable return keys/scopes, action allowlist, and that every typed facade method maps one-to-one. Any signature/return/scope drift fails CI.
+Catalog tests assert every exact `to_regprocedure` signature, SECURITY DEFINER/search_path, owner, `axsys_bff`-only EXECUTE, recursive return-key equality, exact ordered scope array, action allowlist, and one-to-one typed facade mapping. They fail on a missing/extra/nullability-drifted key, reordered parameter, alias, or scope/action drift.
 
 - [ ] **Step 6: Add restricted attachment-version execution**
 
-Create `private.version_contract_attachment(actor,session,contract_id,file_id,attachment_group_id,correlation_id)` with SECURITY DEFINER, search_path empty, and explicit active-session/module checks, derived company, exact contract/file company, purpose contract_attachment, ready/clean file, and matching consumed upload-intent target. Lock the contract row first and require `closed_at is null`, then lock the file/claim and current attachment group, mark only the prior version superseded, insert version+1 (or 1), set `app.actor_id`, and audit atomically. A reservation made while open grants no right to link after closure.
+Create `private.version_contract_attachment(p_actor_id uuid,p_session_id uuid,p_contract_id uuid,p_file_id uuid,p_attachment_group_id uuid,p_correlation_id uuid)` with SECURITY DEFINER, search_path empty, and explicit active-session/module checks, derived company, exact contract/file company, purpose contract_attachment, ready/clean file, and matching consumed upload-intent target. Lock the contract row first and require `closed_at is null`, then lock the file/claim and current attachment group, mark only the prior version superseded, insert version+1 (or 1), set `app.actor_id`, and audit atomically. A reservation made while open grants no right to link after closure. It returns only `{ record: ContractAttachmentDTO, scopes: ['contracts','storage'] }`; no bucket, path, intent secret, scan internals, actor column, or tenant supplied by the caller crosses this facade.
 
 Revoke EXECUTE from public, anon, authenticated, and service_role; grant only to axsys_bff and expose a typed method. Do not create any public/Data API wrapper. The private routine repeats every identity, module, tenant, target, purpose, scan, replay and status check.
 
@@ -1026,7 +1058,7 @@ Expected: the matrix passes; A sees no B row; users without administrative and p
 
 Run:
 
-    git add "$RLS_MIGRATION" supabase/tests/database/03_administrative_rls.test.sql src/lib/supabase/database.types.ts src/lib/db/bff.ts tests/contracts/administrative-bff-boundary.test.ts
+    git add "$RLS_MIGRATION" supabase/tests/database/03_administrative_rls.test.sql src/lib/supabase/database.types.ts src/lib/db/bff.ts src/modules/contracts/domain/contract-types.ts tests/contracts/administrative-bff-boundary.test.ts
     git commit -m "security: enforce administrative tenant isolation"
 
 Expected: one commit contains all per-operation policies, restricted execution, and adversarial pgTAP coverage.
@@ -1152,7 +1184,7 @@ The same post-rounding bound is used by contract/payment schemas and every arith
 
 - [ ] **Step 6: Write failing contract lifecycle and cursor tests**
 
-First freeze `getCompanyLocalDate(timeZone, now)` in `src/lib/dates/company-local-date.ts` using the canonical timezone persisted by Plan 02 and an injected `Date`; it returns strict YYYY-MM-DD and never uses process/session timezone. Unit tests cross both sides of UTC midnight for America/Fortaleza. Inject its result `today = 2026-07-10` and assert:
+First freeze `getCompanyLocalDate(timeZone, instant)` in `src/lib/dates/company-local-date.ts` using the canonical timezone persisted by Plan 02 and an injected `Date`; it returns strict YYYY-MM-DD and never uses process/session timezone. The same function converts both the request clock and a persisted `closed_at` instant. Unit tests cross both sides of UTC midnight for America/Fortaleza, including a closure whose UTC date differs from its company-local date. Inject its result `today = 2026-07-10` and assert:
 
 - closed_at present returns closed regardless of date;
 - ends_on 2026-07-09 returns expired;
@@ -1516,6 +1548,9 @@ Expected: one commit provides proposal server behavior without PDF or UI concern
 - Create: src/modules/documents/server/proposal-pdf-template.tsx
 - Create: src/modules/documents/server/proposal-pdf-service.ts
 - Create: src/modules/documents/server/generated-document-repository.ts
+- Create through CLI: supabase/migrations/*_proposal_document_writer.sql
+- Modify: src/lib/db/bff.ts
+- Modify: src/lib/supabase/database.types.ts
 - Create: src/app/api/administrative/proposals/[proposalId]/documents/route.ts
 - Create: src/app/api/administrative/proposals/[proposalId]/documents/[documentId]/download/route.ts
 - Test: tests/unit/modules/proposals/proposal-snapshot.test.ts
@@ -1558,9 +1593,9 @@ Expected: FAIL because the document service and routes do not exist.
 
 proposal-pdf-service.ts obtains requireCompanyContext('administrative'), reloads proposal/client/items/settings under RLS, reads branding through file-repository, renders with renderToBuffer, validates with pdf-lib, computes SHA-256, and writes to axsys-private under companyId/generated-documents/randomUUID.pdf. The path contains no submitted filename.
 
-Run `npx supabase migration new proposal_document_writer`, resolve the exact emitted `*_proposal_document_writer.sql` path, and create `private.store_proposal_document(...)` there as a fixed-empty-search_path SECURITY DEFINER function. It verifies actor/session against active tenant membership plus the administrative module, sets transaction-local `app.actor_id` only after that verification, locks the proposal and `private.company_storage_usage`, derives/validates the `${companyId}/generated-documents/${randomUUID}.pdf` prefix, requires `application/pdf`, positive size within the generated-document limit, matching SHA-256, an object-shaped strict snapshot, and template `proposal-v1`; it rejects quota overflow before metadata, increments `used_bytes` by the exact PDF size, then inserts the ready/clean `file_objects` row and immutable `generated_documents` row in one transaction.
+Run `npx supabase migration new proposal_document_writer`, resolve the exact emitted `*_proposal_document_writer.sql` path, and create `private.store_proposal_document(p_actor_id uuid,p_session_id uuid,p_proposal_id uuid,p_object_path text,p_content_type text,p_byte_size bigint,p_sha256 text,p_snapshot jsonb,p_template_version text,p_correlation_id uuid)` there as a fixed-empty-search_path SECURITY DEFINER function. It verifies actor/session against active tenant membership plus the administrative module, sets transaction-local `app.actor_id` only after that verification, locks the proposal and `private.company_storage_usage`, derives/validates the `${companyId}/generated-documents/${randomUUID}.pdf` prefix, requires `application/pdf`, positive size within the generated-document limit, matching SHA-256, an object-shaped strict snapshot, and template `proposal-v1`; it rejects quota overflow before metadata, increments `used_bytes` by the exact PDF size, then inserts the ready/clean `file_objects` row, immutable `generated_documents` row, one safe generation audit row, and canonical scopes in one transaction. Its exact return is `{documentId,version,checksumSha256,templateVersion,createdAt,scopes:['proposals','storage']}`; it never returns the file-object ID, bucket, path, snapshot, or actor columns.
 
-In the same migration create `private.authorize_proposal_document_download(actor,session,document_id,correlation_id)`, which joins generated_documents(kind='proposal')→proposal→ready/clean file, derives company, requires the administrative module, calls Plan 02's owner-only `begin_download_audit_core`, and returns exact server metadata plus attemptId/completionNonce. Revoke both functions from public, anon, authenticated, and service_role; grant only to `axsys_bff`, and add typed methods to `src/lib/db/bff.ts`. Never modify a migration that was committed/applied by Task 4.
+In the same migration create `private.authorize_proposal_document_download(p_actor_id uuid,p_session_id uuid,p_document_id uuid,p_correlation_id uuid)`, which joins generated_documents(kind='proposal')→proposal→ready/clean file, derives company, requires the administrative module, calls Plan 02's owner-only `begin_download_audit_core`, and returns exactly `{bucket,path,mime,byteSize,sha256,downloadName,attemptId,completionNonce}` to server-only code. Revoke both functions from public, anon, authenticated, and service_role; grant only to `axsys_bff`, and add one-to-one typed methods to `src/lib/db/bff.ts`; catalog/source tests assert both `to_regprocedure` signatures and return-key allowlists. Never modify a migration that was committed/applied by Task 4.
 
 generated-document-repository.ts uploads/removes the exact object through the server-only Storage admin client, but persists metadata/quota only by calling `private.store_proposal_document` through the restricted BFF connection—never through direct service-role table CRUD. If Storage upload or the atomic database call/quota check fails, delete the promoted object; if cleanup fails, emit the existing redacted cleanup security event so the Plan 02 reconciler finds the uncounted orphan. Tests cover two concurrent PDFs at the quota boundary, exact used-byte increment, rejection without metadata, Storage compensation, and no double decrement. `src/lib/supabase/admin.ts` is confined to exact-path Storage operations in this writer.
 
@@ -1576,6 +1611,7 @@ Run:
 
     npm run test:unit -- tests/unit/modules/proposals/proposal-snapshot.test.ts tests/unit/modules/documents/proposal-pdf-template.test.tsx
     npm run test:integration -- tests/integration/proposals/proposal-pdf.test.ts
+    npm run db:types
 
 Expected: real PDFs load, malicious text remains inert, no active PDF actions exist, versions are immutable, failed persistence leaves no orphan, cross-tenant generation/download returns 404, and the final streamed response is no-store attachment/nosniff/sandbox with verified hash and size.
 
@@ -1585,7 +1621,7 @@ Run:
 
     DOCUMENT_WRITER_MIGRATION="$(find supabase/migrations -type f -name '*_proposal_document_writer.sql' | sort | tail -1)"
     test -n "$DOCUMENT_WRITER_MIGRATION"
-    git add "$DOCUMENT_WRITER_MIGRATION" src/modules/proposals/server/proposal-snapshot.ts src/modules/documents src/lib/db/bff.ts src/app/api/administrative/proposals tests/unit/modules/proposals/proposal-snapshot.test.ts tests/unit/modules/documents tests/integration/proposals/proposal-pdf.test.ts
+    git add "$DOCUMENT_WRITER_MIGRATION" src/modules/proposals/server/proposal-snapshot.ts src/modules/documents src/lib/db/bff.ts src/lib/supabase/database.types.ts src/app/api/administrative/proposals tests/unit/modules/proposals/proposal-snapshot.test.ts tests/unit/modules/documents tests/integration/proposals/proposal-pdf.test.ts
     git commit -m "feat: generate immutable proposal PDFs"
 
 Expected: one commit delivers the complete real-PDF lifecycle.
@@ -1676,7 +1712,7 @@ Expected: FAIL on missing repository pagination.
 
 - [ ] **Step 3: Implement parameterized filters and keyset access**
 
-The service reads the company's canonical timezone under the same authorized request, calls `getCompanyLocalDate(timezone, injectedClock.now())` exactly once, and passes that immutable `today` to every lifecycle/filter/DTO calculation in the request. Repository queries company_id plus predicates from that value; never use browser date, Node local timezone, SQL session `current_date`, or a second clock read:
+The service reads the company's canonical timezone under the same authorized request, calls `getCompanyLocalDate(timezone, injectedClock.now())` exactly once, and passes that immutable `today` to every lifecycle/filter/DTO calculation in the request. For each closed row it separately converts the persisted `closed_at` instant with `getCompanyLocalDate(timezone, new Date(closed_at))` and supplies that strict date as `closedOn`; it never truncates `closed_at` in UTC. Repository queries company_id plus predicates from the single `today` value; never use browser date, Node local timezone, SQL session `current_date`, or a second clock read:
 
 - closed: closed_at is not null;
 - expired: closed_at is null and ends_on < today;
@@ -1714,11 +1750,16 @@ Expected: one commit contains contract server behavior without upload/UI couplin
 ### Task 14: Extend the shared secure upload for private versioned contract attachments
 
 **Files:**
+- Create through CLI: supabase/migrations/*_contract_upload_authorization.sql
+- Modify: src/lib/db/bff.ts
+- Modify: src/lib/supabase/database.types.ts
 - Modify: src/modules/files/domain/upload-policy.ts
 - Modify: src/modules/files/server/create-upload-intent.ts
+- Modify: src/modules/files/server/finalize-upload-intent.ts
 - Modify: src/modules/files/server/authorize-file-download.ts
 - Create: src/modules/contracts/server/contract-attachment-service.ts
 - Create: src/app/api/administrative/contracts/[contractId]/attachments/route.ts
+- Modify: tests/unit/files/upload-policy.test.ts
 - Create: tests/integration/contracts/contract-attachments.test.ts
 
 - [ ] **Step 1: Write failing file-policy tests**
@@ -1749,7 +1790,7 @@ Do not recreate file_objects, intents, buckets, global limits, TUS, or scanner. 
 
 - [ ] **Step 4: Authorize intent target and final link**
 
-Run `npx supabase migration new contract_upload_authorization` and use only the emitted path. Create `private.reserve_contract_attachment_upload(actor,session,contract_id,declared_name,declared_mime,declared_size,correlation_id)` and `private.authorize_contract_attachment_download(actor,session,file_id,correlation_id)`, fixed-empty-search_path, EXECUTE only for axsys_bff. Reservation revalidates app session, administrative module, same-tenant active contract and policy/size, then calls the single Plan 02 `reserve_upload_capability_core` so path, `2 * declared_size` hold, quota lock, three/100-MiB per-user caps and status reserved cannot diverge. The generic activation function performs reserved→issued and fixes the shared two-hour signed-authorization plus 24h15m TUS cleanup-grace deadlines; no direct authenticated INSERT exists. The download function joins file→attachment→contract, rechecks tenant/module plus ready/clean, calls the owner-only download-audit core, and returns exact metadata plus attemptId/nonce only server-side. Add typed bffDb methods.
+Run `npx supabase migration new contract_upload_authorization` and use only the emitted path. Create `private.reserve_contract_attachment_upload(p_actor_id uuid,p_session_id uuid,p_contract_id uuid,p_declared_name text,p_declared_mime text,p_declared_size bigint,p_correlation_id uuid)` and `private.authorize_contract_attachment_download(p_actor_id uuid,p_session_id uuid,p_file_id uuid,p_correlation_id uuid)`, fixed-empty-search_path, EXECUTE only for axsys_bff. Reservation revalidates app session, administrative module, same-tenant active contract and policy/size, then calls the single Plan 02 `reserve_upload_capability_core` so path, `2 * declared_size` hold, quota lock, three/100-MiB per-user caps and status reserved cannot diverge; its exact recursive return is Plan 02's defined `UploadReservationDTO`, whose only keys are `{intentId,quarantinePath,declaredSize}`. The generic activation function performs reserved→issued and fixes the shared two-hour signed-authorization plus 24h15m TUS cleanup-grace deadlines; no direct authenticated INSERT exists. The download function joins file→attachment→contract, rechecks tenant/module plus ready/clean, calls the owner-only download-audit core, and returns exactly `{bucket,path,mime,byteSize,sha256,downloadName,attemptId,completionNonce}` only to server code. Add one-to-one typed bffDb methods and catalog tests for both signatures/return allowlists.
 
 create-upload-intent.ts dispatches contract_attachment only to that reservation method. A foreign/random contract receives the same 404. After TUS finalize returns a ready/clean FileObject, contract-attachment-service calls only `bffDb.versionContractAttachment(actor,session,contractId,fileObjectId,attachmentGroupId,correlationId)` from Task 5; it sends no companyId. The database locks/reverifies matching intent target, purpose, scan, status, tenant, replay/group CAS, audit, and outbox atomically.
 

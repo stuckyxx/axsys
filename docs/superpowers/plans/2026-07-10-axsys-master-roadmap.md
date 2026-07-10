@@ -155,11 +155,12 @@ Execute in this order. Plans 01 and 02 establish cross-cutting primitives consum
 | Shared TUS quarantine/capability lifetime, quota holds/retirement, MIME/magic checks, ClamAV, private Storage | Plans 02–05 |
 | Clients, catalog, client aggregate detail, deletion/archive integrity | Plan 03 |
 | Proposals, Decimal calculations, sequence, status, canonical PDF | Plan 03 |
-| Contracts, status/progress, filters, attachments, close/payment shortcuts | Plan 03 defines hidden/canonical links; Plan 05 installs routes and enables them |
+| Contracts, status/progress, filters, contract routes, attachment routes/workflow, and close | Plan 03 creates and verifies all contract/attachment pages and Route Handlers |
+| Contract-to-payment shortcuts | Plan 03 defines the canonical URLs behind `paymentRequestsRouteAvailable=false` and keeps both actions hidden; Plan 05 creates the payment-request destinations, flips the capability to true, and only then renders the actions |
 | Certificate types/versions, inclusive validity, history, publication/revocation | Plan 04 |
 | Public certificate no-store page, 15-second/focus polling, hierarchical limits and reauthorized downloads | Plan 04 |
 | Income/expense CRUD, real totals/chart, immutable automatic postings | Plan 05 |
-| Payment drafts, invoice files, Gemini suggestions/manual fallback | Plan 05 |
+| Payment drafts, invoice files, Gemini suggestions/manual fallback, source lock after formalization and pre-payment cancellation | Plan 05 |
 | Six-certificate formalization, controlled override, snapshot | Plan 05 |
 | Atomic paid/income/tax transaction, idempotency, concurrency, reversal | Plan 05 |
 | Immutable payment letters/process PDFs, isolated sanitizer container and protected downloads | Plan 05 |
@@ -282,7 +283,7 @@ Treat Gemini output as untrusted suggestions, preserve manual fallback, and keep
 
 - [ ] **Step 2: Run the Plan 05 gate**
 
-Expected: ledgers/dashboard use real values; formalization snapshots six certificates; payment creates exactly one posting set; reversal is auditable; PDFs are escaped, immutable, and tenant-protected.
+Expected: ledgers/dashboard use real company-local dates; formalization snapshots six certificates and locks source fields; pending/formalized cancellation preserves the correct history without postings; payment creates exactly one posting set; cancellation/reversal are auditable; PDFs are escaped, immutable, and tenant-protected.
 
 - [ ] **Step 3: Record the checkpoint**
 

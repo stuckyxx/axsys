@@ -600,7 +600,7 @@ Preserve the Plan 01 scripts and add these exact entries to package.json:
     "docs:check": "prettier --check README.md 'docs/**/*.md'",
     "verify": "tsx scripts/verify.ts"
 
-`scripts/verify.ts` runs, in this exact order, `security:secrets`, lint, typecheck, coverage, sanitizer:build, sanitizer:self-test, integration, db:lint, db:test, db:advisors, build, E2E, docs and dependency audit. The image therefore exists before payment-document integration. It stops on first failure but always invokes `sanitizer:clean` in `finally`, without hiding the original exit code. A unit test injects the runner and proves order, early stop, cleanup on success/failure and no shell interpolation. Existing test/db/build names remain canonical; do not introduce `test:db`.
+`scripts/verify.ts` runs, in this exact order, `security:secrets`, lint, typecheck, coverage, sanitizer:build, sanitizer:self-test, integration, db:lint, db:test, db:advisors, build, E2E, docs and dependency audit. The image therefore exists before payment-document integration. Build, self-test, runtime, and this verifier import Plan 05's single `resolveSanitizerImage(repoRoot)` from `src/modules/documents/server/sanitizer-image.ts`. In local/CI mode, build captures the Docker Image ID from `--iidfile`, writes the owner-only non-versioned lock, and returns that exact `sha256:${imageIdHex}` as the job output; self-test and payment-document integration run in the same job/daemon, resolve the lock again, and must pass the identical Image ID—not any tag—to Docker. The verifier fails before integration on missing image, mutable reference, unsafe lock, ID/inspect mismatch, pinned-base mismatch, or auxiliary source-label mismatch. A later CI job cannot treat the local ID artifact as a pullable image: it must consume a published canonical `registry/repository@sha256:${manifestHex}`, verify that exact manifest digest, and separately inspect its config labels. No versioned lock, `latest`, source-derived/CI-only tag, caller override, or `name:tag@digest` is legal authority. It stops on first failure but always invokes `sanitizer:clean` in `finally`, without hiding the original exit code. A unit test injects the runner and proves order, same-job identical-ID propagation, hosted manifest-digest propagation, tag rejection before process spawn, safe cleanup on success/failure and no shell interpolation. Existing test/db/build names remain canonical; do not introduce `test:db`.
 
 - [ ] **Step 2: Create CI with pinned actions**
 
@@ -647,7 +647,7 @@ Run:
 
 - [ ] **Step 1: Write the full business-flow test**
 
-Bootstrap Super Admin, create a company/admin/bank, create a user with modules, configure company identity, create client/catalog/proposal/PDF/contract, upload valid certificates, create/formalize/pay request, verify income/tax/document, and publish/download/revoke a certificate.
+Bootstrap Super Admin, create a company/admin/bank, create a user with modules, configure company identity, create client/catalog/proposal/PDF/contract, upload valid certificates, create/formalize/pay one request, verify income/tax/document, cancel separate pending and formalized requests while preserving the correct snapshots and creating no posting, and publish/download/revoke a certificate.
 
 - [ ] **Step 2: Write the isolation and IDOR matrix**
 
@@ -655,7 +655,7 @@ Repeat protected reads/mutations/downloads with Company B identifiers across eve
 
 - [ ] **Step 3: Write the cache-consistency matrix**
 
-Use two browser contexts and two tabs. After each create/update/archive/permission/payment/publish/revoke operation, assert lists, details, counters, dashboards, alerts, public page, and navigation update without hard reload, logout, or cache clearing. Simulate Realtime disconnect and verify focus/online/watchdog fallback.
+Use two browser contexts and two tabs. After each create/update/archive/permission/payment/cancel/reverse/publish/revoke operation, assert lists, details, counters, dashboards, alerts, public page, and navigation update without hard reload, logout, or cache clearing. Simulate Realtime disconnect and verify focus/online/watchdog fallback.
 
 - [ ] **Step 4: Write XSS, CSRF, SSRF, upload, and replay regressions**
 
