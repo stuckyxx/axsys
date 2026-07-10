@@ -15,7 +15,7 @@
     "test:rls": "supabase test db supabase/tests/database",
     "test:e2e": "playwright test",
     "test:all": "npm run lint && npm run typecheck && npm run test:unit && npm run test:integration && npm run test:rls && npm run test:e2e && npm run build",
-    "db:start": "supabase start",
+    "db:start": "tsx scripts/start-local-supabase.ts",
     "db:stop": "supabase stop",
     "db:status": "supabase status",
     "db:env": "tsx scripts/provision-local-env.ts",

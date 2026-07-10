@@ -1,0 +1,2 @@
+-- Intentionally empty: users and passwords are provisioned from untracked environment variables.
+-- Domain fixtures live inside transactional pgTAP tests and are rolled back.
