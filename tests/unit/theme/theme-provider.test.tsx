@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { useTheme } from "next-themes"
+import { StrictMode } from "react"
+import { createPortal } from "react-dom"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import PublicLayout from "@/app/(public)/layout"
@@ -30,6 +32,10 @@ function ThemeProbe() {
   const { theme } = useTheme()
 
   return <output data-testid="active-theme">{theme}</output>
+}
+
+function BodyPortalProbe() {
+  return createPortal(<output data-testid="body-portal">Portal público</output>, document.body)
 }
 
 afterEach(() => {
@@ -130,6 +136,54 @@ describe("AxsysThemeProvider", () => {
       expect(document.documentElement).toHaveClass("light")
       expect(screen.getByTestId("active-theme")).toHaveTextContent("light")
     })
+    expect(localStorage.getItem("axsys-theme:public")).toBeNull()
+  })
+
+  it("força dark na rota pública e restaura o tema anterior ao sair", async () => {
+    const protectedView = render(
+      <AxsysThemeProvider userId="user-a" initialTheme="light">
+        <ThemeProbe />
+      </AxsysThemeProvider>,
+    )
+
+    await waitFor(() => {
+      expect(document.documentElement).toHaveClass("light")
+      expect(document.documentElement).toHaveStyle({ colorScheme: "light" })
+    })
+
+    protectedView.unmount()
+    expect(document.documentElement).toHaveClass("light")
+
+    const renderPublicRoute = () =>
+      render(
+        <StrictMode>
+          <PublicLayout>
+            <BodyPortalProbe />
+          </PublicLayout>
+        </StrictMode>,
+      )
+
+    const firstPublicView = renderPublicRoute()
+
+    expect(screen.getByTestId("body-portal").parentElement).toBe(document.body)
+    expect(document.documentElement).toHaveClass("dark")
+    expect(document.documentElement).not.toHaveClass("light")
+    expect(document.documentElement).toHaveStyle({ colorScheme: "dark" })
+    expect(localStorage.getItem("axsys-theme:public")).toBeNull()
+
+    firstPublicView.unmount()
+    expect(document.documentElement).toHaveClass("light")
+    expect(document.documentElement).not.toHaveClass("dark")
+    expect(document.documentElement).toHaveStyle({ colorScheme: "light" })
+
+    const secondPublicView = renderPublicRoute()
+    expect(document.documentElement).toHaveClass("dark")
+    expect(document.documentElement).not.toHaveClass("light")
+
+    secondPublicView.unmount()
+    expect(document.documentElement).toHaveClass("light")
+    expect(document.documentElement).not.toHaveClass("dark")
+    expect(document.documentElement).toHaveStyle({ colorScheme: "light" })
     expect(localStorage.getItem("axsys-theme:public")).toBeNull()
   })
 })
