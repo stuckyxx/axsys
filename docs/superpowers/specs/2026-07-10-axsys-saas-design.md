@@ -206,7 +206,7 @@ O PostgreSQL será a única fonte de verdade para dados de negócio. Sessões, r
 - Atualizações comuns poderão usar feedback otimista somente quando houver rollback automático e nenhuma consequência financeira ou de autorização.
 - Registros mutáveis terão version ou updated_at. O update enviará a versão conhecida; se outra sessão já tiver alterado o registro, o servidor responderá com conflito 409 e a interface mostrará os dados atuais antes de permitir nova tentativa.
 - Rascunhos continuarão salvos no banco, separados por usuário e empresa, e não serão confundidos com cache de leitura.
-- Publicação ou revogação de certidão será refletida imediatamente na página pública. A primeira versão usará no-store nessa página e fará o download público atravessar o BFF, que revalida a publicação em cada requisição, para priorizar correção e revogação imediata sobre desempenho.
+- Publicação ou revogação de certidão será refletida na página pública por leitura inicial no-store, polling autorizado enquanto visível e nova leitura em foco/conexão. O download público atravessa o BFF e revalida publicação e empresa ativa em cada requisição, priorizando correção e revogação imediata sobre desempenho.
 
 O critério de experiência é explícito: depois de salvar, arquivar, pagar, publicar, revogar ou alterar uma permissão, a informação correta deve aparecer em todas as telas relacionadas sem o usuário limpar cache, sair da conta ou executar recarga forçada.
 
@@ -216,7 +216,7 @@ O critério de experiência é explícito: depois de salvar, arquivar, pagar, pu
 
 - E-mail será normalizado e globalmente único, sem diferença entre maiúsculas e minúsculas.
 - Senhas serão administradas pelo Supabase Auth, nunca armazenadas em tabelas da aplicação.
-- Senhas terão de 12 a 128 caracteres, aceitarão frases com espaços e serão recusadas quando constarem em lista local de senhas comuns ou comprometidas.
+- Senhas terão no mínimo 12 pontos de código e no máximo 72 bytes UTF-8 (limite do Supabase Auth/bcrypt), aceitarão frases com espaços, exigirão ao menos um caractere não vazio e serão recusadas quando constarem em lista local de senhas comuns ou comprometidas.
 - A mensagem de falha será genérica para impedir enumeração de contas.
 - Tentativas terão rate limit por IP e conta, atraso progressivo e auditoria.
 - A sessão será gerenciada pelo BFF em cookies Secure, HttpOnly e SameSite; tokens não ficarão em localStorage.
@@ -275,7 +275,7 @@ Com empresas A e B, um usuário da empresa A não poderá:
 - criar vínculo com um ID da empresa B;
 - editar, arquivar ou excluir registros da empresa B;
 - receber eventos Realtime da empresa B;
-- solicitar URL assinada para arquivo da empresa B;
+- solicitar download, URL ou path de arquivo da empresa B;
 - baixar relatório, documento ou anexo da empresa B;
 - usar um link manipulado para atravessar o isolamento.
 
@@ -357,7 +357,7 @@ O conteúdo fica em bucket privado. Caminhos internos usam identificadores aleat
 - Arquivos ficam em quarentena até a varredura.
 - Nomes fornecidos pelo usuário nunca formam o caminho real.
 
-Downloads autenticados passam por autorização antes de gerar URL assinada com validade máxima de 60 segundos. Downloads públicos atravessam o BFF e revalidam a publicação antes de transmitir o arquivo, sem expor uma URL persistente do Storage. Quotas por empresa e rate limits evitam abuso de armazenamento.
+Downloads autenticados e públicos atravessam o BFF, que autoriza novamente, lê o path privado apenas no servidor, confirma tamanho/checksum e transmite o arquivo sem expor URL ou path do Storage. Cada tentativa autorizada recebe um identificador/nonce efêmero server-only e termina com auditoria de conclusão, aborto ou falha. Quotas por empresa e rate limits evitam abuso de armazenamento.
 
 ## 11. Modelo de dados
 
@@ -550,7 +550,7 @@ Ausência de anexo gera indicação explícita no processo, sem quebrar o docume
 - Não consulta diretamente tabelas privadas pelo cliente.
 - Mostra somente razão social, código público e versões vigentes publicadas.
 - O histórico permanece privado na primeira versão.
-- Download é autorizado pelo estado de publicação e usa URL temporária.
+- Download é autorizado novamente pelo estado de publicação e transmitido pelo BFF sem URL de Storage no navegador.
 - Link pode ser revogado e o identificador alternativo pode ser rotacionado.
 - A página usa noindex por padrão.
 - Tentativas e downloads ficam sujeitos a rate limit e telemetria sem expor dados pessoais desnecessários.
@@ -672,7 +672,7 @@ Quando o produto for hospedado, as mesmas migrations, políticas, buckets e test
 - SELECT, INSERT, UPDATE e DELETE por tabela;
 - troca maliciosa de company_id;
 - referência cruzada entre tenants;
-- URL assinada e caminho de Storage;
+- tentativa de obter URL/path de Storage e manipulação de identificadores de download;
 - eventos Realtime;
 - payloads de IDOR em APIs e relatórios;
 - payloads XSS em UI e PDFs;
