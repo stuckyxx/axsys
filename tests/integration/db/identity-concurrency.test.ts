@@ -15,6 +15,7 @@ const LOCAL_DATABASE_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"])
 const WORKER_A_NAME = "axsys-identity-race-a"
 const WORKER_B_NAME = "axsys-identity-race-b"
 const IDENTITY_LOCK_SEED = 1672
+const GLOBAL_IDENTITY_LOCK_KEY = 0
 const COMPANY_ADMIN_LOCK_SEED = 2102
 const WAIT_TIMEOUT_MS = 3_000
 const LOCK_TIMEOUT_MS = 6_000
@@ -101,6 +102,8 @@ const workerB = postgres(databaseUrl, {
 })
 
 let foundationAvailable = false
+let globalStatementLockAvailable = false
+let workerAPid = 0
 let workerBPid = 0
 
 async function beginBoundedTransaction(sql: Sql): Promise<void> {
@@ -140,6 +143,17 @@ async function runTransaction(
   }
 }
 
+async function captureOutcome(
+  statement: () => Promise<unknown>,
+): Promise<Outcome> {
+  try {
+    await statement()
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, error }
+  }
+}
+
 async function waitForAdvisoryBlock(
   observer: Sql,
   backendPid: number,
@@ -163,6 +177,73 @@ async function waitForAdvisoryBlock(
     await delay(25)
   }
   throw new Error("Expected advisory lock wait was not observed")
+}
+
+async function waitForGlobalAdvisoryBlock(
+  observer: Sql,
+  holderPid: number,
+  waiterPid: number,
+  waiterApplicationName: string,
+): Promise<{
+  waiterLocks: Array<{
+    classId: number
+    objectId: number
+    objectSubId: number
+    granted: boolean
+  }>
+  globalLocks: { granted: number; waiting: number }
+}> {
+  const deadline = Date.now() + WAIT_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    await observer`select pg_stat_clear_snapshot()`
+    const [activity] = await observer<[{ blocked: boolean }]>`
+      select exists (
+        select 1
+        from pg_stat_activity
+        where pid = ${waiterPid}
+          and application_name = ${waiterApplicationName}
+          and state = 'active'
+          and wait_event_type = 'Lock'
+          and wait_event = 'advisory'
+      ) as blocked
+    `
+    const waiterLocks = await observer<
+      Array<{
+        classId: number
+        objectId: number
+        objectSubId: number
+        granted: boolean
+      }>
+    >`
+      select
+        classid::integer as "classId",
+        objid::integer as "objectId",
+        objsubid::integer as "objectSubId",
+        granted
+      from pg_locks
+      where pid = ${waiterPid}
+        and locktype = 'advisory'
+      order by classid, objid, objsubid, granted
+    `
+    const [globalLocks] = await observer<
+      [{ granted: number; waiting: number }]
+    >`
+      select
+        count(*) filter (where granted)::integer as granted,
+        count(*) filter (where not granted)::integer as waiting
+      from pg_locks
+      where pid in (${holderPid}, ${waiterPid})
+        and locktype = 'advisory'
+        and classid = ${IDENTITY_LOCK_SEED}::oid
+        and objid = ${GLOBAL_IDENTITY_LOCK_KEY}::oid
+        and objsubid = 2
+    `
+    if (activity.blocked && waiterLocks.length > 0) {
+      return { waiterLocks, globalLocks }
+    }
+    await delay(25)
+  }
+  throw new Error("Expected global advisory lock wait was not observed")
 }
 
 function expectConflict(outcome: Outcome, message: string): void {
@@ -386,7 +467,13 @@ async function cleanupFixtures(sql: Sql): Promise<void> {
 beforeAll(async () => {
   const [[identityA], [identityB]] = await Promise.all([
     workerA<
-      [{ owner: boolean; available: boolean; pid: number; applicationName: string }]
+      [{
+        owner: boolean
+        available: boolean
+        globalStatementLockAvailable: boolean
+        pid: number
+        applicationName: string
+      }]
     >`
       select
         current_user = 'postgres' as owner,
@@ -395,6 +482,8 @@ beforeAll(async () => {
           and to_regclass('public.companies') is not null
           and to_regclass('public.company_memberships') is not null
           and to_regclass('public.member_modules') is not null as available,
+        to_regprocedure('private.serialize_identity_invariants()') is not null
+          as "globalStatementLockAvailable",
         pg_backend_pid() as pid,
         current_setting('application_name') as "applicationName"
     `,
@@ -414,8 +503,10 @@ beforeAll(async () => {
   ) {
     throw new Error("Identity concurrency database is unavailable")
   }
+  workerAPid = identityA.pid
   workerBPid = identityB.pid
   foundationAvailable = identityA.available
+  globalStatementLockAvailable = identityA.globalStatementLockAvailable
   if (foundationAvailable) await cleanupFixtures(workerA)
 })
 
@@ -515,31 +606,14 @@ describe.sequential("identity invariants under concurrent writes", () => {
     }
   }, 20_000)
 
-  it("orders opposite user-id updates without a deadlock", async () => {
+  it("serializes opposite multi-statement identity updates without a deadlock", async () => {
     if (!foundationAvailable) return
-    let sessionGateHeld = false
-    let platformAttempt: Promise<Outcome> | undefined
-    let membershipAttempt: Promise<Outcome> | undefined
-    let readyCount = 0
-    let reportBothReady: (() => void) | undefined
-    let releaseStart: (() => void) | undefined
-    let startReleased = false
-    const bothReady = new Promise<void>((resolve) => {
-      reportBothReady = resolve
-    })
-    const start = new Promise<void>((resolve) => {
-      releaseStart = resolve
-    })
-    const waitAtStart = async (): Promise<void> => {
-      readyCount += 1
-      if (readyCount === 2) reportBothReady?.()
-      await start
-    }
-    const releaseBarrier = (): void => {
-      if (startReleased) return
-      startReleased = true
-      releaseStart?.()
-    }
+    let workerATransactionOpen = false
+    let workerBTransactionOpen = false
+    let membershipNoopAttempt: Promise<Outcome> | undefined
+    let platformCrossAttempt: Promise<Outcome> | undefined
+    let platformCrossOutcome: Outcome | undefined
+    let membershipCrossOutcome: Outcome | undefined
     try {
       await cleanupFixtures(workerA)
       await createUser(workerA, USERS.swapPlatform, "swap-platform@example.test")
@@ -559,93 +633,118 @@ describe.sequential("identity invariants under concurrent writes", () => {
         )
       `
 
+      await beginBoundedTransaction(workerA)
+      workerATransactionOpen = true
       await workerA`
-        select pg_advisory_lock(
-          hashtextextended(${USERS.swapPlatform}::text, ${IDENTITY_LOCK_SEED})
-        )
+        update public.platform_roles
+        set user_id = user_id
+        where user_id = ${USERS.swapPlatform}::uuid
       `
-      sessionGateHeld = true
 
-      platformAttempt = runTransaction(workerA, async () => {
-        await waitAtStart()
-        return workerA`
+      await beginBoundedTransaction(workerB)
+      workerBTransactionOpen = true
+      membershipNoopAttempt = captureOutcome(() => workerB`
+        update public.company_memberships
+        set user_id = user_id
+        where id = ${MEMBERSHIPS.swap}::uuid
+      `)
+
+      if (globalStatementLockAvailable) {
+        const lockSnapshot = await waitForGlobalAdvisoryBlock(
+          workerA,
+          workerAPid,
+          workerBPid,
+          WORKER_B_NAME,
+        )
+        expect(lockSnapshot.waiterLocks).toEqual([
+          {
+            classId: IDENTITY_LOCK_SEED,
+            objectId: GLOBAL_IDENTITY_LOCK_KEY,
+            objectSubId: 2,
+            granted: false,
+          },
+        ])
+        expect(lockSnapshot.globalLocks).toEqual({ granted: 1, waiting: 1 })
+
+        platformCrossOutcome = await captureOutcome(() => workerA`
           update public.platform_roles
           set user_id = ${USERS.swapMember}::uuid
           where user_id = ${USERS.swapPlatform}::uuid
-        `
-      })
-      membershipAttempt = runTransaction(workerB, async () => {
-        await waitAtStart()
-        return workerB`
+        `)
+        await rollbackQuietly(workerA)
+        workerATransactionOpen = false
+
+        expect(await membershipNoopAttempt).toEqual({ ok: true })
+        membershipCrossOutcome = await captureOutcome(() => workerB`
           update public.company_memberships
           set user_id = ${USERS.swapPlatform}::uuid
           where id = ${MEMBERSHIPS.swap}::uuid
-        `
-      })
-      expect(platformAttempt).toBeDefined()
-      expect(membershipAttempt).toBeDefined()
+        `)
+        await rollbackQuietly(workerB)
+        workerBTransactionOpen = false
+      } else {
+        expect(await membershipNoopAttempt).toEqual({ ok: true })
+        platformCrossAttempt = captureOutcome(() => workerA`
+          update public.platform_roles
+          set user_id = ${USERS.swapMember}::uuid
+          where user_id = ${USERS.swapPlatform}::uuid
+        `)
+        await waitForAdvisoryBlock(workerB, workerAPid, WORKER_A_NAME)
 
-      const readinessTimeout = new AbortController()
-      try {
-        await Promise.race([
-          bothReady,
-          delay(WAIT_TIMEOUT_MS, undefined, {
-            signal: readinessTimeout.signal,
-            ref: false,
-          }).then(() => {
-            throw new Error("Both identity updates did not reach the start barrier")
-          }),
-        ])
-      } finally {
-        readinessTimeout.abort()
+        membershipCrossOutcome = await captureOutcome(() => workerB`
+          update public.company_memberships
+          set user_id = ${USERS.swapPlatform}::uuid
+          where id = ${MEMBERSHIPS.swap}::uuid
+        `)
+        platformCrossOutcome = await platformCrossAttempt
+        await rollbackQuietly(workerA)
+        workerATransactionOpen = false
+        await rollbackQuietly(workerB)
+        workerBTransactionOpen = false
       }
-      releaseBarrier()
 
-      const platformOutcome = await platformAttempt
-      expectConflict(platformOutcome, "identity_scope_conflict")
-
-      await waitForAdvisoryBlock(workerA, workerBPid, WORKER_B_NAME)
-      const [membershipLocks] = await workerA<
-        [{ granted: number; waiting: number }]
-      >`
-        select
-          count(*) filter (where granted)::integer as granted,
-          count(*) filter (where not granted)::integer as waiting
-        from pg_locks
-        where pid = ${workerBPid}
-          and locktype = 'advisory'
-      `
-      expect(membershipLocks).toEqual({ granted: 0, waiting: 1 })
-
-      await releaseSessionGate(workerA, USERS.swapPlatform, IDENTITY_LOCK_SEED)
-      sessionGateHeld = false
-      const membershipOutcome = await membershipAttempt
-      expectConflict(membershipOutcome, "identity_scope_conflict")
+      expect(platformCrossOutcome).toBeDefined()
+      expect(membershipCrossOutcome).toBeDefined()
+      expectConflict(platformCrossOutcome!, "identity_scope_conflict")
+      expectConflict(membershipCrossOutcome!, "identity_scope_conflict")
 
       const [unchanged] = await workerA<
-        [{ platformUser: string; membershipUser: string }]
+        [{ platformUser: string; membershipUser: string; identityRows: number }]
       >`
         select
           (select user_id::text from public.platform_roles
             where user_id = ${USERS.swapPlatform}::uuid) as "platformUser",
           (select user_id::text from public.company_memberships
-            where id = ${MEMBERSHIPS.swap}::uuid) as "membershipUser"
+            where id = ${MEMBERSHIPS.swap}::uuid) as "membershipUser",
+          (
+            (select count(*) from public.platform_roles
+              where user_id in (
+                ${USERS.swapPlatform}::uuid,
+                ${USERS.swapMember}::uuid
+              ))
+            + (select count(*) from public.company_memberships
+              where user_id in (
+                ${USERS.swapPlatform}::uuid,
+                ${USERS.swapMember}::uuid
+              ))
+          )::integer as "identityRows"
       `
       expect(unchanged).toEqual({
         platformUser: USERS.swapPlatform,
         membershipUser: USERS.swapMember,
+        identityRows: 2,
       })
     } finally {
-      releaseBarrier()
-      await finalizeGateRace({
-        workerATransactionOpen: false,
-        sessionGateHeld,
-        resourceId: USERS.swapPlatform,
-        seed: IDENTITY_LOCK_SEED,
-        concurrentAttempts: [platformAttempt, membershipAttempt].filter(
-          (attempt): attempt is Promise<Outcome> => attempt !== undefined,
-        ),
-      })
+      if (globalStatementLockAvailable) {
+        if (workerATransactionOpen) await rollbackQuietly(workerA)
+        if (membershipNoopAttempt) await membershipNoopAttempt
+        if (workerBTransactionOpen) await rollbackQuietly(workerB)
+      } else {
+        if (workerBTransactionOpen) await rollbackQuietly(workerB)
+        if (platformCrossAttempt) await platformCrossAttempt
+        if (workerATransactionOpen) await rollbackQuietly(workerA)
+      }
+      await cleanupFixtures(workerA)
     }
   }, 20_000)
 

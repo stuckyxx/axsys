@@ -202,6 +202,25 @@ for each row execute function private.touch_version();
 create trigger memberships_touch_version before update on public.company_memberships
 for each row execute function private.touch_version();
 
+create function private.serialize_identity_invariants() returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  perform pg_advisory_xact_lock(1672, 0);
+  return null;
+end;
+$$;
+
+create trigger platform_roles_serialize_identity_invariants
+before insert or update of user_id on public.platform_roles
+for each statement execute function private.serialize_identity_invariants();
+create trigger company_memberships_serialize_identity_invariants
+before insert or update of user_id, company_id, role, status or delete
+on public.company_memberships
+for each statement execute function private.serialize_identity_invariants();
+
 create function private.enforce_identity_exclusivity() returns trigger
 language plpgsql
 set search_path = ''

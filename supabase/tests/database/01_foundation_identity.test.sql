@@ -185,12 +185,34 @@ select results_eq(
     order by class.relname, trigger.tgname$$,
   $$values
     ('companies','companies_touch_version','touch_version','O'),
+    ('company_memberships','company_memberships_serialize_identity_invariants','serialize_identity_invariants','O'),
     ('company_memberships','membership_identity_exclusivity','enforce_identity_exclusivity','O'),
     ('company_memberships','memberships_touch_version','touch_version','O'),
     ('company_memberships','protect_last_company_admin','protect_last_company_admin','O'),
     ('platform_roles','platform_role_identity_exclusivity','enforce_identity_exclusivity','O'),
+    ('platform_roles','platform_roles_serialize_identity_invariants','serialize_identity_invariants','O'),
     ('profiles','profiles_touch_version','touch_version','O')$$,
   'triggers essenciais estão habilitados e ligados à função correta'
+);
+select results_eq(
+  $$select class.relname::text collate "default",
+           trigger.tgname::text collate "default",
+           trigger.tgtype::integer,
+           pg_get_triggerdef(trigger.oid, false)::text collate "default"
+    from pg_trigger trigger
+    join pg_class class on class.oid = trigger.tgrelid
+    where trigger.tgname in (
+        'company_memberships_serialize_identity_invariants',
+        'platform_roles_serialize_identity_invariants'
+      )
+      and not trigger.tgisinternal
+    order by class.relname, trigger.tgname$$,
+  $$values
+    ('company_memberships','company_memberships_serialize_identity_invariants',30,
+     'CREATE TRIGGER company_memberships_serialize_identity_invariants BEFORE INSERT OR DELETE OR UPDATE OF user_id, company_id, role, status ON public.company_memberships FOR EACH STATEMENT EXECUTE FUNCTION private.serialize_identity_invariants()'),
+    ('platform_roles','platform_roles_serialize_identity_invariants',22,
+     'CREATE TRIGGER platform_roles_serialize_identity_invariants BEFORE INSERT OR UPDATE OF user_id ON public.platform_roles FOR EACH STATEMENT EXECUTE FUNCTION private.serialize_identity_invariants()')$$,
+  'serialização global cobre exatamente os eventos statement-level contratados'
 );
 select is(
   (
@@ -207,26 +229,26 @@ select results_eq(
   $$select function.proname::text collate "default",
            owner.rolname::text collate "default",
            language.lanname::text collate "default",
+           function.prokind::text collate "default",
            function.prosecdef
     from pg_proc function
     join pg_namespace namespace on namespace.oid = function.pronamespace
     join pg_roles owner on owner.oid = function.proowner
     join pg_language language on language.oid = function.prolang
     where namespace.nspname = 'private'
-      and function.proname in ('touch_version','enforce_identity_exclusivity','protect_last_company_admin')
     order by function.proname$$,
   $$values
-    ('enforce_identity_exclusivity','postgres','plpgsql',false),
-    ('protect_last_company_admin','postgres','plpgsql',false),
-    ('touch_version','postgres','plpgsql',false)$$,
-  'funções de trigger pertencem a postgres e são SECURITY INVOKER'
+    ('enforce_identity_exclusivity','postgres','plpgsql','f',false),
+    ('protect_last_company_admin','postgres','plpgsql','f',false),
+    ('serialize_identity_invariants','postgres','plpgsql','f',false),
+    ('touch_version','postgres','plpgsql','f',false)$$,
+  'funções privadas são functions de postgres e SECURITY INVOKER'
 );
 select is_empty(
   $$select function.oid::regprocedure::text
     from pg_proc function
     join pg_namespace namespace on namespace.oid = function.pronamespace
     where namespace.nspname = 'private'
-      and function.proname in ('touch_version','enforce_identity_exclusivity','protect_last_company_admin')
       and not ('search_path=""' = any(coalesce(function.proconfig, '{}'::text[])))$$,
   'funções privadas fixam search_path vazio'
 );
@@ -381,6 +403,22 @@ select is_empty(
   'funções privadas não possuem EXECUTE inesperado'
 );
 select is_empty(
+  $$select coalesce(grantee.rolname, 'PUBLIC') || ':' || grant_item.privilege_type
+    from pg_proc proc
+    join pg_namespace namespace on namespace.oid = proc.pronamespace
+    cross join lateral aclexplode(
+      coalesce(proc.proacl, acldefault('f', proc.proowner))
+    ) grant_item
+    left join pg_roles grantee on grantee.oid = grant_item.grantee
+    where namespace.nspname = 'private'
+      and proc.proname = 'serialize_identity_invariants'
+      and (
+        grant_item.grantee = 0
+        or grantee.rolname in ('anon','authenticated','service_role','axsys_bff')
+      )$$,
+  'serialização global não expõe EXECUTE a PUBLIC/API/BFF'
+);
+select is_empty(
   $$select defaults.defaclobjtype::text || ':' ||
            coalesce(namespace.nspname, '<global>') || ':' ||
            coalesce(grantee.rolname, 'PUBLIC') || ':' || grant_item.privilege_type
@@ -399,6 +437,16 @@ select is_empty(
         or grantee.rolname in ('anon','authenticated','service_role','axsys_bff')
       )$$,
   'default ACLs postgres permanecem fail-closed em global/public/private'
+);
+select ok(
+  exists (
+    select 1
+    from pg_default_acl defaults
+    where defaults.defaclrole = 'postgres'::regrole
+      and defaults.defaclnamespace = 0
+      and defaults.defaclobjtype = 'f'
+  ),
+  'default ACL global de functions permanece explicitamente fail-closed'
 );
 
 -- Somente o runner pgTAP recebe acesso transacional às assertions; o rollback remove estes grants.
