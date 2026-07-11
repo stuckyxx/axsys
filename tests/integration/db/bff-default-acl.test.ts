@@ -294,7 +294,13 @@ describe("axsys_bff default ACL hardening", () => {
       `
 
       const [explicitPrivileges] = await supabaseAdminOwnerSql<
-        [{ authenticatedSelect: boolean; bffExecute: boolean }]
+        [{
+          authenticatedSelect: boolean
+          authenticatedThemeUpdate: boolean
+          authenticatedProfileTableUpdate: boolean
+          otherAuthenticatedUpdateColumns: number
+          bffExecute: boolean
+        }]
       >`
         select
           has_table_privilege(
@@ -302,6 +308,37 @@ describe("axsys_bff default ACL hardening", () => {
             'public.axsys_bff_acl_authenticated_probe',
             'SELECT'
           ) as "authenticatedSelect",
+          has_column_privilege(
+            'authenticated',
+            'public.profiles',
+            'preferred_theme',
+            'UPDATE'
+          ) as "authenticatedThemeUpdate",
+          has_table_privilege(
+            'authenticated',
+            'public.profiles',
+            'UPDATE'
+          ) as "authenticatedProfileTableUpdate",
+          (
+            select count(*)::integer
+            from pg_attribute attribute
+            join pg_class class on class.oid = attribute.attrelid
+            join pg_namespace namespace on namespace.oid = class.relnamespace
+            where namespace.nspname = 'public'
+              and class.relkind in ('r', 'p')
+              and attribute.attnum > 0
+              and not attribute.attisdropped
+              and not (
+                class.relname = 'profiles'
+                and attribute.attname = 'preferred_theme'
+              )
+              and has_column_privilege(
+                'authenticated',
+                format('%I.%I', namespace.nspname, class.relname),
+                attribute.attname,
+                'UPDATE'
+              )
+          ) as "otherAuthenticatedUpdateColumns",
           has_function_privilege(
             'axsys_bff',
             'private.axsys_bff_acl_private_probe()',
@@ -337,6 +374,9 @@ describe("axsys_bff default ACL hardening", () => {
       ).toBe(true)
       expect(explicitPrivileges).toEqual({
         authenticatedSelect: true,
+        authenticatedThemeUpdate: true,
+        authenticatedProfileTableUpdate: false,
+        otherAuthenticatedUpdateColumns: 0,
         bffExecute: true,
       })
     } finally {

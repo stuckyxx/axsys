@@ -307,28 +307,56 @@ select results_eq(
     ('type','theme_preference','postgres')$$,
   'tabelas e enums pertencem ao migration owner postgres'
 );
-select is_empty(
-  $$select policyname from pg_policies
+select results_eq(
+  $$select tablename::text collate "default",
+           policyname::text collate "default",
+           cmd::text collate "default",
+           array_to_string(roles, ',')::text collate "default"
+    from pg_policies
     where schemaname = 'public'
-      and tablename in ('profiles','platform_roles','companies','company_memberships','member_modules')$$,
-  'Task 5 mantém default-deny sem policies'
+      and tablename in (
+        'profiles','platform_roles','companies','company_memberships','member_modules'
+      )
+    order by tablename, policyname$$,
+  $$values
+    ('companies','companies_select_authorized','SELECT','authenticated'),
+    ('company_memberships','memberships_select_company_admin_or_self',
+      'SELECT','authenticated'),
+    ('member_modules','member_modules_select_company_admin_or_self',
+      'SELECT','authenticated'),
+    ('platform_roles','platform_roles_select_self','SELECT','authenticated'),
+    ('profiles','profiles_select_self','SELECT','authenticated'),
+    ('profiles','profiles_update_self','UPDATE','authenticated')$$,
+  'estado pós-Task7 possui exatamente as seis policies RLS allowlisted'
 );
 
-select is_empty(
-  $$select role_name || ':' || relation_name || ':' || privilege_name
+select results_eq(
+  $$select role_name::text collate "default",
+           relation_name::text collate "default",
+           privilege_name::text collate "default"
     from unnest(array['anon','authenticated','service_role','axsys_bff']) roles(role_name)
     cross join unnest(array['profiles','platform_roles','companies','company_memberships','member_modules']) relations(relation_name)
-    cross join unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) privileges(privilege_name)
+    cross join unnest(array[
+      'SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN'
+    ]) privileges(privilege_name)
     where has_table_privilege(
       role_name,
       to_regclass(format('public.%I', relation_name)),
       privilege_name
-    )$$,
-  'nenhum papel de API/BFF herda privilégio de tabela'
+    )
+    order by role_name, relation_name, privilege_name$$,
+  $$values
+    ('authenticated','companies','SELECT'),
+    ('authenticated','company_memberships','SELECT'),
+    ('authenticated','member_modules','SELECT'),
+    ('authenticated','platform_roles','SELECT'),
+    ('authenticated','profiles','SELECT')$$,
+  'privilégios efetivos de tabela são exatamente os cinco SELECTs Task7'
 );
-select is_empty(
-  $$select class.relname || ':' || coalesce(grantee.rolname, 'PUBLIC') || ':' ||
-           grant_item.privilege_type
+select results_eq(
+  $$select class.relname::text collate "default",
+           coalesce(grantee.rolname, 'PUBLIC')::text collate "default",
+           grant_item.privilege_type::text collate "default"
     from pg_class class
     join pg_namespace namespace on namespace.oid = class.relnamespace
     cross join lateral aclexplode(
@@ -340,12 +368,22 @@ select is_empty(
       and (
         grant_item.grantee = 0
         or grantee.rolname in ('anon','authenticated','service_role','axsys_bff')
-      )$$,
-  'tabelas base não possuem grants diretos para PUBLIC/API/BFF'
+      )
+    order by class.relname, coalesce(grantee.rolname, 'PUBLIC'),
+             grant_item.privilege_type$$,
+  $$values
+    ('companies','authenticated','SELECT'),
+    ('company_memberships','authenticated','SELECT'),
+    ('member_modules','authenticated','SELECT'),
+    ('platform_roles','authenticated','SELECT'),
+    ('profiles','authenticated','SELECT')$$,
+  'grants diretos de tabela são exatamente os cinco SELECTs authenticated'
 );
-select is_empty(
-  $$select class.relname || ':' || attribute.attname || ':' ||
-           coalesce(grantee.rolname, 'PUBLIC') || ':' || grant_item.privilege_type
+select results_eq(
+  $$select class.relname::text collate "default",
+           attribute.attname::text collate "default",
+           coalesce(grantee.rolname, 'PUBLIC')::text collate "default",
+           grant_item.privilege_type::text collate "default"
     from pg_attribute attribute
     join pg_class class on class.oid = attribute.attrelid
     join pg_namespace namespace on namespace.oid = class.relnamespace
@@ -358,8 +396,11 @@ select is_empty(
       and (
         grant_item.grantee = 0
         or grantee.rolname in ('anon','authenticated','service_role','axsys_bff')
-      )$$,
-  'nenhum papel de API/BFF recebe privilégio direto de coluna'
+      )
+    order by class.relname, attribute.attname,
+             coalesce(grantee.rolname, 'PUBLIC'), grant_item.privilege_type$$,
+  $$values ('profiles','preferred_theme','authenticated','UPDATE')$$,
+  'grant direto de coluna é somente preferred_theme UPDATE para authenticated'
 );
 select has_schema('private');
 select results_eq(
@@ -391,8 +432,9 @@ select ok(
   ),
   'service_role não recebe USAGE no schema privado'
 );
-select is_empty(
-  $$select coalesce(grantee.rolname, 'PUBLIC') || ':' || grant_item.privilege_type
+select results_eq(
+  $$select coalesce(grantee.rolname, 'PUBLIC')::text collate "default",
+           grant_item.privilege_type::text collate "default"
     from pg_namespace namespace
     cross join lateral aclexplode(
       coalesce(namespace.nspacl, acldefault('n', namespace.nspowner))
@@ -403,8 +445,10 @@ select is_empty(
         grant_item.grantee = 0
         or grantee.rolname in ('anon','authenticated','service_role')
       )
-      and grant_item.privilege_type in ('USAGE', 'CREATE')$$,
-  'PUBLIC e papéis de API não possuem USAGE ou CREATE no schema privado'
+      and grant_item.privilege_type in ('USAGE', 'CREATE')
+    order by coalesce(grantee.rolname, 'PUBLIC'), grant_item.privilege_type$$,
+  $$values ('authenticated','USAGE')$$,
+  'authenticated recebe somente USAGE privado; PUBLIC/anon/service seguem negados'
 );
 select is_empty(
   $$select proc.oid::regprocedure::text || ':' ||
@@ -493,9 +537,9 @@ grant execute on function
   extensions.add_result(boolean, boolean, text, text, text)
 to authenticated, service_role;
 set local role authenticated;
-select extensions.throws_ok(
-  $$select user_id from public.profiles limit 1$$,
-  '42501', null, 'authenticated não lê tabela base sem grant'
+select extensions.ok(
+  (select count(*) from public.profiles) = 0,
+  'authenticated sem JWT/sessão ativa recebe zero linhas por RLS'
 );
 reset role;
 set local role service_role;

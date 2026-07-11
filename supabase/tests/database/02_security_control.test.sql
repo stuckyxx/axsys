@@ -694,14 +694,23 @@ select results_eq(
     ('private.write_security_event(text,uuid,text,text,audit_outcome,text,uuid,jsonb)')$$,
   'axsys_bff recebe exatamente nove EXECUTEs efetivos, incluindo memberships'
 );
-select is_empty(
-  $$select role_name || ':' || function.oid::regprocedure::text
+select results_eq(
+  $$select role_name::text collate "default",
+           function.oid::regprocedure::text collate "default"
     from unnest(array['anon','authenticated','service_role']) role_name
     cross join pg_proc function
     join pg_namespace namespace on namespace.oid = function.pronamespace
     where namespace.nspname = 'private'
-      and has_function_privilege(role_name, function.oid, 'EXECUTE')$$,
-  'PUBLIC e API roles não recebem EXECUTE efetivo em nenhuma rotina private'
+      and has_function_privilege(role_name, function.oid, 'EXECUTE')
+    order by role_name, function.oid::regprocedure::text$$,
+  $$values
+    ('authenticated','private.has_active_app_session()'),
+    ('authenticated','private.has_company_role(uuid,membership_role)'),
+    ('authenticated','private.has_module(uuid,module_key)'),
+    ('authenticated','private.has_platform_role()'),
+    ('authenticated','private.has_registered_app_session()'),
+    ('authenticated','private.is_active_company_member(uuid)')$$,
+  'authenticated executa exatamente seis helpers RLS; anon/service seguem negados'
 );
 select is_empty(
   $$select function.oid::regprocedure::text

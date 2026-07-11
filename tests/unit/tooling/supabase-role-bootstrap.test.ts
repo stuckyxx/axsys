@@ -134,8 +134,14 @@ describe("Supabase custom role bootstrap", () => {
     expect(repeatableHardeningSql).toContain(
       "revoke all privileges on all tables in schema public\n  from anon, service_role;",
     )
+    expect(repeatableHardeningSql).toMatch(
+      /revoke insert, update, delete, truncate, references, trigger, maintain\s+on all tables in schema public\s+from authenticated;/u,
+    )
     expect(repeatableHardeningSql).toContain(
-      "revoke insert, update, delete, truncate, references, trigger, maintain\n  on all tables in schema public\n  from authenticated;",
+      "grant update (preferred_theme) on public.profiles to authenticated;",
+    )
+    expect(repeatableHardeningSql).toMatch(
+      /v_preserve_theme_update := has_column_privilege\([\s\S]*?'preferred_theme', 'UPDATE'[\s\S]*?revoke insert, update, delete, truncate, references, trigger, maintain[\s\S]*?if v_preserve_theme_update then[\s\S]*?grant update \(preferred_theme\)/u,
     )
     expect(repeatableHardeningSql).not.toContain(
       "revoke all privileges on all tables in schema public from anon, authenticated, service_role;",

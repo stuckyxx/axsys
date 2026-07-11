@@ -73,9 +73,51 @@ revoke all privileges on all sequences in schema public from public;
 revoke all privileges on all functions in schema public from public;
 revoke all privileges on all tables in schema public
   from anon, service_role;
-revoke insert, update, delete, truncate, references, trigger, maintain
-  on all tables in schema public
-  from authenticated;
+do $$
+declare
+  v_preserve_theme_update boolean := false;
+begin
+  if to_regclass('public.profiles') is not null
+     and exists (
+       select 1
+       from pg_attribute attribute
+       where attribute.attrelid = 'public.profiles'::regclass
+         and attribute.attname = 'preferred_theme'
+         and attribute.attnum > 0
+         and not attribute.attisdropped
+     ) then
+    v_preserve_theme_update := has_column_privilege(
+      'authenticated', 'public.profiles', 'preferred_theme', 'UPDATE'
+    );
+  end if;
+
+  revoke insert, update, delete, truncate, references, trigger, maintain
+    on all tables in schema public
+    from authenticated;
+
+  if v_preserve_theme_update then
+    grant update (preferred_theme) on public.profiles to authenticated;
+
+    if has_table_privilege('authenticated', 'public.profiles', 'UPDATE')
+       or exists (
+         select 1
+         from pg_attribute attribute
+         where attribute.attrelid = 'public.profiles'::regclass
+           and attribute.attnum > 0
+           and not attribute.attisdropped
+           and attribute.attname <> 'preferred_theme'
+           and has_column_privilege(
+             'authenticated',
+             'public.profiles',
+             attribute.attname,
+             'UPDATE'
+           )
+       ) then
+      raise exception 'profile theme grant assertion failed';
+    end if;
+  end if;
+end
+$$;
 revoke all privileges on all sequences in schema public
   from anon, authenticated, service_role;
 revoke all privileges on all functions in schema public
