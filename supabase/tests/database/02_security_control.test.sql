@@ -1857,6 +1857,128 @@ select results_eq(
   $$select revoked_before, updated_at from cutoff_before_fail_closed$$,
   'fail-closed não avança o cutoff global'
 );
+
+select test_helpers.create_auth_session(
+  '62000000-0000-4000-8000-000000000005',
+  '61000000-0000-4000-8000-000000000001',
+  clock_timestamp()
+);
+select private.register_auth_session(
+  '62000000-0000-4000-8000-000000000005',
+  '61000000-0000-4000-8000-000000000001',
+  false
+);
+update public.profiles
+set must_change_password = true,
+    temporary_password_expires_at = clock_timestamp() + interval '1 hour'
+where user_id = '61000000-0000-4000-8000-000000000001';
+select throws_ok(
+  $$select private.fail_closed_login_session(
+    '61000000-0000-4000-8000-000000000001',
+    '62000000-0000-4000-8000-000000000005',
+    'TEMPORARY_PASSWORD_EXPIRED',
+    '63000000-0000-4000-8000-000000000050'
+  )$$,
+  '23514', 'auth_temporary_password_expiry_unverified',
+  'fail-closed não aceita classificar senha provisória ainda válida'
+);
+select is(
+  (select state::text from private.auth_session_controls
+   where session_id = '62000000-0000-4000-8000-000000000005'),
+  'pending',
+  'classificação nonexpired rejeitada não altera a sessão'
+);
+
+select test_helpers.create_auth_session(
+  '62000000-0000-4000-8000-000000000006',
+  '61000000-0000-4000-8000-000000000001',
+  clock_timestamp()
+);
+select private.register_auth_session(
+  '62000000-0000-4000-8000-000000000006',
+  '61000000-0000-4000-8000-000000000001',
+  false
+);
+update public.profiles
+set is_active = false,
+    temporary_password_expires_at = clock_timestamp() - interval '1 second'
+where user_id = '61000000-0000-4000-8000-000000000001';
+select throws_ok(
+  $$select private.fail_closed_login_session(
+    '61000000-0000-4000-8000-000000000001',
+    '62000000-0000-4000-8000-000000000006',
+    'TEMPORARY_PASSWORD_EXPIRED',
+    '63000000-0000-4000-8000-000000000051'
+  )$$,
+  '23514', 'auth_temporary_password_expiry_unverified',
+  'fail-closed não classifica profile inativo como expiração válida'
+);
+select is(
+  (select state::text from private.auth_session_controls
+   where session_id = '62000000-0000-4000-8000-000000000006'),
+  'pending',
+  'classificação de profile inativo rejeitada não altera a sessão'
+);
+
+select test_helpers.create_auth_session(
+  '62000000-0000-4000-8000-000000000007',
+  '61000000-0000-4000-8000-000000000001',
+  clock_timestamp()
+);
+select private.register_auth_session(
+  '62000000-0000-4000-8000-000000000007',
+  '61000000-0000-4000-8000-000000000001',
+  false
+);
+update public.profiles
+set is_active = true
+where user_id = '61000000-0000-4000-8000-000000000001';
+select throws_ok(
+  $$select private.fail_closed_login_session(
+    '61000000-0000-4000-8000-000000000099',
+    '62000000-0000-4000-8000-000000000007',
+    'TEMPORARY_PASSWORD_EXPIRED',
+    '63000000-0000-4000-8000-000000000052'
+  )$$,
+  '23514', 'auth_temporary_password_expiry_unverified',
+  'actor forjado não usa profile expirado de outro usuário'
+);
+select is(
+  (select state::text from private.auth_session_controls
+   where session_id = '62000000-0000-4000-8000-000000000007'),
+  'pending',
+  'actor forjado não revoga a sessão legítima'
+);
+
+select test_helpers.create_auth_session(
+  '62000000-0000-4000-8000-000000000008',
+  '61000000-0000-4000-8000-000000000001',
+  clock_timestamp()
+);
+select private.register_auth_session(
+  '62000000-0000-4000-8000-000000000008',
+  '61000000-0000-4000-8000-000000000001',
+  false
+);
+select lives_ok(
+  $$select private.fail_closed_login_session(
+    '61000000-0000-4000-8000-000000000001',
+    '62000000-0000-4000-8000-000000000008',
+    'TEMPORARY_PASSWORD_EXPIRED',
+    '63000000-0000-4000-8000-000000000053'
+  )$$,
+  'fail-closed classifica e revoga senha provisória realmente expirada'
+);
+select is(
+  (select state::text from private.auth_session_controls
+   where session_id = '62000000-0000-4000-8000-000000000008'),
+  'revoked',
+  'classificação expired revoga atomicamente a sessão exata'
+);
+update public.profiles
+set must_change_password = false,
+    temporary_password_expires_at = null
+where user_id = '61000000-0000-4000-8000-000000000001';
 select throws_ok(
   $$update private.auth_session_controls
     set updated_at = clock_timestamp()
@@ -1870,6 +1992,10 @@ where id in (
   '62000000-0000-4000-8000-000000000001',
   '62000000-0000-4000-8000-000000000003',
   '62000000-0000-4000-8000-000000000004',
+  '62000000-0000-4000-8000-000000000005',
+  '62000000-0000-4000-8000-000000000006',
+  '62000000-0000-4000-8000-000000000007',
+  '62000000-0000-4000-8000-000000000008',
   '62000000-0000-4000-8000-000000000010',
   '62000000-0000-4000-8000-000000000011',
   '62000000-0000-4000-8000-000000000012',

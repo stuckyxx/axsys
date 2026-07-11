@@ -33,6 +33,7 @@ const USERS = {
   profileDeactivate: "71000000-0000-4000-8000-000000000007",
   companyArchive: "71000000-0000-4000-8000-000000000008",
   platformRoleDeactivate: "71000000-0000-4000-8000-000000000009",
+  temporaryPasswordExpiry: "71000000-0000-4000-8000-000000000010",
 } as const
 
 const SESSIONS = {
@@ -50,6 +51,7 @@ const SESSIONS = {
   companyArchiveOld: "72000000-0000-4000-8000-000000000012",
   companyArchiveNew: "72000000-0000-4000-8000-000000000013",
   platformRoleDeactivatePending: "72000000-0000-4000-8000-000000000014",
+  temporaryPasswordExpiryPending: "72000000-0000-4000-8000-000000000015",
 } as const
 
 const CORRELATIONS = {
@@ -66,6 +68,7 @@ const CORRELATIONS = {
   companyArchiveLogin: "73000000-0000-4000-8000-000000000011",
   companyArchiveRotate: "73000000-0000-4000-8000-000000000012",
   platformRoleDeactivateLogin: "73000000-0000-4000-8000-000000000013",
+  temporaryPasswordExpiryFailClosed: "73000000-0000-4000-8000-000000000014",
 } as const
 
 const COMPANIES = {
@@ -366,6 +369,22 @@ async function writeLoginAudit(
       null::text,
       null::text,
       '{"rememberMe":false}'::jsonb
+    )
+  `
+}
+
+async function classifyExpiredTemporaryPassword(
+  sql: Sql,
+  sessionId: string,
+  userId: string,
+  correlationId: string,
+): Promise<void> {
+  await sql`
+    select private.fail_closed_login_session(
+      ${userId}::uuid,
+      ${sessionId}::uuid,
+      'TEMPORARY_PASSWORD_EXPIRED',
+      ${correlationId}::uuid
     )
   `
 }
@@ -1043,6 +1062,72 @@ describe.sequential("security controls under concurrent writes", () => {
     } finally {
       if (profileTransactionOpen) await rollbackQuietly(workerA)
       if (loginAttempt) await loginAttempt
+      await cleanupSecurityFixtures(workerA)
+    }
+  }, 20_000)
+
+  it("linearizes temporary-password expiry classification with profile updates", async () => {
+    if (!securityControlAvailable) return
+    let profileTransactionOpen = false
+    let classificationAttempt: Promise<Outcome<void>> | undefined
+    try {
+      await cleanupSecurityFixtures(workerA)
+      await createPlatformUser(
+        workerA,
+        USERS.temporaryPasswordExpiry,
+        "temporary-password-expiry-race@example.test",
+      )
+      await createAuthSession(
+        workerA,
+        SESSIONS.temporaryPasswordExpiryPending,
+        USERS.temporaryPasswordExpiry,
+        30,
+      )
+      await registerSession(
+        workerA,
+        SESSIONS.temporaryPasswordExpiryPending,
+        USERS.temporaryPasswordExpiry,
+      )
+
+      await beginBoundedTransaction(workerA)
+      profileTransactionOpen = true
+      await workerA`
+        update public.profiles
+        set must_change_password = true,
+            temporary_password_expires_at = clock_timestamp() - interval '1 second'
+        where user_id = ${USERS.temporaryPasswordExpiry}::uuid
+      `
+      classificationAttempt = captureOutcome(() =>
+        classifyExpiredTemporaryPassword(
+          workerB,
+          SESSIONS.temporaryPasswordExpiryPending,
+          USERS.temporaryPasswordExpiry,
+          CORRELATIONS.temporaryPasswordExpiryFailClosed,
+        ),
+      )
+      await waitForLockWait(coordinator, workerBPid, WORKER_B_NAME)
+      await workerA.unsafe("commit")
+      profileTransactionOpen = false
+
+      expect(await classificationAttempt).toEqual({ ok: true, value: undefined })
+      const [state] = await workerA<
+        [{ mustChangePassword: boolean; sessionState: string }]
+      >`
+        select
+          (select must_change_password from public.profiles
+           where user_id = ${USERS.temporaryPasswordExpiry}::uuid)
+            as "mustChangePassword",
+          (select state::text from private.auth_session_controls
+           where session_id = ${SESSIONS.temporaryPasswordExpiryPending}::uuid)
+            as "sessionState"
+      `
+      expect(state).toEqual({
+        mustChangePassword: true,
+        sessionState: "revoked",
+      })
+    } finally {
+      if (profileTransactionOpen) await rollbackQuietly(workerA)
+      if (classificationAttempt) await classificationAttempt
       await cleanupSecurityFixtures(workerA)
     }
   }, 20_000)

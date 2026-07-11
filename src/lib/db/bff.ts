@@ -4,7 +4,61 @@ import postgres, { type Sql } from "postgres"
 import { getServerEnv } from "@/lib/env/server"
 
 const BFF_DATABASE_FAILURE = "BFF database unavailable"
+const BFF_METADATA_FAILURE = "Invalid BFF metadata"
+const MAX_JSON_DEPTH = 12
+const MAX_JSON_NODES = 1_000
 let bffSql: Promise<Sql> | undefined
+
+type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly JsonValue[]
+  | JsonObject
+
+type JsonObject = Readonly<{ [key: string]: JsonValue }>
+type JsonGuardState = { readonly seen: WeakSet<object>; nodes: number }
+
+function consumeJsonNode(state: JsonGuardState, value: object): boolean {
+  state.nodes += 1
+  if (state.nodes > MAX_JSON_NODES || state.seen.has(value)) return false
+  state.seen.add(value)
+  return true
+}
+
+function isJsonValue(
+  value: unknown,
+  state: JsonGuardState,
+  depth: number,
+): value is JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return true
+  }
+  if (typeof value === "number") return Number.isFinite(value)
+  if (typeof value !== "object" || depth > MAX_JSON_DEPTH) return false
+  if (!consumeJsonNode(state, value)) return false
+
+  if (Array.isArray(value)) {
+    return value.every((entry) => isJsonValue(entry, state, depth + 1))
+  }
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype !== Object.prototype && prototype !== null) return false
+  return Object.values(value).every((entry) =>
+    isJsonValue(entry, state, depth + 1),
+  )
+}
+
+function toJsonObject(metadata: Record<string, unknown>): JsonObject {
+  const state: JsonGuardState = { seen: new WeakSet(), nodes: 0 }
+  if (
+    Array.isArray(metadata) ||
+    !isJsonValue(metadata, state, 0)
+  ) {
+    throw new Error(BFF_METADATA_FAILURE)
+  }
+  return metadata
+}
 
 async function createVerifiedSql(): Promise<Sql> {
   const sql = postgres(getServerEnv().BFF_DATABASE_URL, {
@@ -114,6 +168,7 @@ export const bffDb = {
     metadata: Record<string, unknown>
   }): Promise<void> {
     const sql = await getSql()
+    const metadata = toJsonObject(input.metadata)
     await sql`
       select private.write_authenticated_audit_event(
         ${input.actorUserId}::uuid,
@@ -126,7 +181,7 @@ export const bffDb = {
         ${input.correlationId}::uuid,
         ${input.ipHash},
         ${input.userAgentHash},
-        ${JSON.stringify(input.metadata)}::jsonb
+        ${sql.json(metadata)}::jsonb
       )
     `
   },
@@ -141,6 +196,7 @@ export const bffDb = {
     metadata: Record<string, unknown>
   }): Promise<void> {
     const sql = await getSql()
+    const metadata = toJsonObject(input.metadata)
     await sql`
       select private.write_security_event(
         ${input.eventType},
@@ -150,7 +206,7 @@ export const bffDb = {
         ${input.outcome},
         ${input.reasonCode},
         ${input.correlationId}::uuid,
-        ${JSON.stringify(input.metadata)}::jsonb
+        ${sql.json(metadata)}::jsonb
       )
     `
   },
