@@ -35,13 +35,13 @@ describe("Playwright server isolation", () => {
   it("binds an owned server to the dedicated default port", async () => {
     const config = await loadPlaywrightConfig()
 
-    expect(config.use?.baseURL).toBe("http://127.0.0.1:3100")
+    expect(config.use?.baseURL).toBe("http://127.0.0.1:3000")
     expect(config.webServer).toMatchObject({
-      command: "npm run dev -- --hostname 127.0.0.1 --port 3100",
-      env: { APP_ORIGIN: "http://127.0.0.1:3100" },
+      command: "npm run dev -- --hostname 127.0.0.1 --port 3000",
+      env: { APP_ORIGIN: "http://127.0.0.1:3000" },
       gracefulShutdown: { signal: "SIGTERM", timeout: 5_000 },
       reuseExistingServer: false,
-      url: "http://127.0.0.1:3100/favicon.ico",
+      url: "http://127.0.0.1:3000/favicon.ico",
     })
     expect(config.failOnFlakyTests).toBe(false)
   })

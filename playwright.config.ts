@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test"
 
 const isCI = Boolean(process.env.CI)
-const port = Number(process.env.PLAYWRIGHT_PORT || 3100)
+const port = Number(process.env.PLAYWRIGHT_PORT || 3000)
 const baseURL = `http://127.0.0.1:${port}`
 const reuseExistingServer =
   !isCI && process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === "1"

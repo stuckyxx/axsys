@@ -492,8 +492,8 @@ describe("rate-limit policy boundary", () => {
     ["login-account-failure", 5, 900, 900],
     ["reauth-ip-volume", 20, 900, 1800],
     ["reauth-account-failure", 5, 900, 900],
-    ["forgot-ip-volume", 10, 900, 60],
-    ["forgot-account-volume", 3, 3600, 60],
+    ["forgot-ip-volume", 10, 900, 3_600],
+    ["forgot-account-volume", 3, 3600, 3_600],
   ] as const)(
     "maps %s to its exact immutable database tuple",
     async (bucket, limit, windowSeconds, blockSeconds) => {

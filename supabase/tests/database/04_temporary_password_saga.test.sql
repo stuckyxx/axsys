@@ -19,6 +19,7 @@ select results_eq(
   $$values
     ('auth_password_operation_kind', 'temporary_password_reset'),
     ('auth_password_operation_kind', 'temporary_password_change'),
+    ('auth_password_operation_kind', 'password_recovery'),
     ('auth_password_operation_status', 'reserved'),
     ('auth_password_operation_status', 'auth_updated'),
     ('auth_password_operation_status', 'completed'),
@@ -152,19 +153,22 @@ select results_eq(
     order by function.proname$$,
   $$values
     ('assert_auth_session'),
+    ('begin_password_recovery'),
     ('begin_temporary_password_reset'),
     ('clear_rate_limit'),
+    ('complete_password_recovery'),
     ('complete_temporary_password_change'),
     ('complete_temporary_password_reset'),
     ('consume_rate_limit'),
     ('fail_closed_login_session'),
+    ('fail_password_recovery'),
     ('fail_temporary_password_reset'),
     ('register_auth_session'),
     ('revoke_sessions_and_write_logout'),
     ('rotate_app_session_after_reauthentication'),
     ('write_authenticated_audit_event'),
     ('write_security_event')$$,
-  'BFF preserva as nove boundaries e recebe somente as quatro novas'
+  'BFF preserva as boundaries anteriores e recebe somente as três de recovery'
 );
 select is_empty(
   $$select role_name || ':' || function.oid::regprocedure::text

@@ -190,3 +190,74 @@ begin
   end if;
 end
 $$;
+
+do $$
+declare
+  v_recovery_function_oid oid := to_regprocedure(
+    'public.issue_password_recovery_grant(text)'
+  );
+  v_recovery_signature text;
+begin
+  if v_recovery_function_oid is not null then
+    if 1 <> (
+      select count(*)
+      from pg_proc function
+      join pg_namespace namespace on namespace.oid = function.pronamespace
+      join pg_roles owner_role on owner_role.oid = function.proowner
+      join pg_language language on language.oid = function.prolang
+      where function.oid = v_recovery_function_oid
+        and namespace.nspname = 'public'
+        and function.proname = 'issue_password_recovery_grant'
+        and owner_role.rolname = 'postgres'
+        and language.lanname = 'plpgsql'
+        and function.prokind = 'f'
+        and function.provolatile = 'v'
+        and function.prosecdef
+        and not function.proretset
+        and function.prorettype = 'timestamptz'::regtype
+        and function.proconfig = array['search_path=""']::text[]
+        and not exists (
+          select 1
+          from pg_depend dependency
+          where dependency.classid = 'pg_proc'::regclass
+            and dependency.objid = function.oid
+            and dependency.deptype = 'e'
+        )
+    ) then
+      raise exception 'password recovery RPC catalog assertion failed';
+    end if;
+
+    select format(
+      '%I.%I(%s)',
+      namespace.nspname,
+      function.proname,
+      pg_get_function_identity_arguments(function.oid)
+    )
+    into strict v_recovery_signature
+    from pg_proc function
+    join pg_namespace namespace on namespace.oid = function.pronamespace
+    where function.oid = v_recovery_function_oid;
+
+    execute format(
+      'revoke execute on function %s from public, anon, authenticated, service_role, axsys_bff',
+      v_recovery_signature
+    );
+    execute format(
+      'grant execute on function %s to authenticated',
+      v_recovery_signature
+    );
+
+    if not has_function_privilege(
+      'authenticated', v_recovery_function_oid, 'EXECUTE'
+    ) or exists (
+      select 1
+      from unnest(array['public','anon','service_role','axsys_bff']) role_name
+      where has_function_privilege(
+        role_name, v_recovery_function_oid, 'EXECUTE'
+      )
+    ) then
+      raise exception 'password recovery RPC privilege assertion failed';
+    end if;
+  end if;
+end
+$$;

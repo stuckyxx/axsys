@@ -52,12 +52,12 @@ const RATE_LIMIT_POLICIES = Object.freeze({
   "forgot-ip-volume": Object.freeze({
     limit: 10,
     windowSeconds: 900,
-    blockSeconds: 60,
+    blockSeconds: 3_600,
   }),
   "forgot-account-volume": Object.freeze({
     limit: 3,
     windowSeconds: 3_600,
-    blockSeconds: 60,
+    blockSeconds: 3_600,
   }),
 } satisfies Record<RateLimitBucket, RateLimitPolicy>)
 

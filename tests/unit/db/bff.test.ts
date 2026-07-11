@@ -12,15 +12,18 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe("bffDb boundary", () => {
-  it("exports only the thirteen typed security-control and password operations", () => {
+  it("exports only the sixteen typed security-control and password operations", () => {
     expect(Object.keys(bffDb).sort()).toEqual([
       "assertAuthSession",
+      "beginPasswordRecovery",
       "beginTemporaryPasswordReset",
       "clearRateLimit",
+      "completePasswordRecovery",
       "completeTemporaryPasswordChange",
       "completeTemporaryPasswordReset",
       "consumeRateLimit",
       "failClosedLoginSession",
+      "failPasswordRecovery",
       "failTemporaryPasswordReset",
       "registerAuthSession",
       "revokeSessionsAndWriteLogout",
@@ -204,6 +207,33 @@ describe("bffDb boundary", () => {
     expectTypeOf(bffDb.completeTemporaryPasswordChange).returns.toEqualTypeOf<
       Promise<void>
     >()
+    expectTypeOf<Parameters<typeof bffDb.beginPasswordRecovery>>().toEqualTypeOf<
+      [input: { grantHash: string; correlationId: string }]
+    >()
+    expectTypeOf(bffDb.beginPasswordRecovery).returns.toEqualTypeOf<
+      Promise<{ operationId: string; userId: string; sessionId: string }>
+    >()
+    expectTypeOf<
+      Parameters<typeof bffDb.completePasswordRecovery>
+    >().toEqualTypeOf<
+      [input: { operationId: string; correlationId: string }]
+    >()
+    expectTypeOf(bffDb.completePasswordRecovery).returns.toEqualTypeOf<
+      Promise<void>
+    >()
+    expectTypeOf<Parameters<typeof bffDb.failPasswordRecovery>>().toEqualTypeOf<
+      [
+        input: {
+          operationId: string
+          reasonCode:
+            | "AUTH_PROVIDER_FAILURE"
+            | "AUTH_COMPLETION_FAILURE"
+            | "AUTH_CALL_NOT_ATTEMPTED"
+          correlationId: string
+        },
+      ]
+    >()
+    expectTypeOf(bffDb.failPasswordRecovery).returns.toEqualTypeOf<Promise<void>>()
   })
 
   it("keeps the SQL client private and uses static private function names", () => {
@@ -219,12 +249,15 @@ describe("bffDb boundary", () => {
     ).sort()
     expect(staticRoutineNames).toEqual([
       "assert_auth_session",
+      "begin_password_recovery",
       "begin_temporary_password_reset",
       "clear_rate_limit",
+      "complete_password_recovery",
       "complete_temporary_password_change",
       "complete_temporary_password_reset",
       "consume_rate_limit",
       "fail_closed_login_session",
+      "fail_password_recovery",
       "fail_temporary_password_reset",
       "register_auth_session",
       "revoke_sessions_and_write_logout",

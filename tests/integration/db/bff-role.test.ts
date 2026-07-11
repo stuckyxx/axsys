@@ -531,6 +531,65 @@ describe("axsys_bff", () => {
     }
   })
 
+  it("regrants only the attested recovery RPC during repeated db:env hardening", async () => {
+    const [catalogBefore] = await supabaseAdminOwnerSql<[{ available: boolean }]>`
+      select to_regprocedure(
+        'public.issue_password_recovery_grant(text)'
+      ) is not null as available
+    `
+    expect(catalogBefore.available).toBe(true)
+
+    await hardenLocalPublicPrivileges(supabaseAdminUrl.toString())
+    await hardenLocalPublicPrivileges(supabaseAdminUrl.toString())
+
+    const [catalog] = await supabaseAdminOwnerSql<
+      [{ valid: boolean; signature: string }]
+    >`
+      select
+        owner_role.rolname = 'postgres'
+          and function.prosecdef
+          and not function.proretset
+          and function.prorettype = 'timestamptz'::regtype
+          and language.lanname = 'plpgsql'
+          and function.proconfig = array['search_path=""']::text[] as valid,
+        function.oid::regprocedure::text as signature
+      from pg_proc function
+      join pg_namespace namespace on namespace.oid = function.pronamespace
+      join pg_roles owner_role on owner_role.oid = function.proowner
+      join pg_language language on language.oid = function.prolang
+      where function.oid = to_regprocedure(
+        'public.issue_password_recovery_grant(text)'
+      )
+        and namespace.nspname = 'public'
+    `
+    expect(catalog).toEqual({
+      valid: true,
+      signature: "issue_password_recovery_grant(text)",
+    })
+
+    const privileges = await supabaseAdminOwnerSql<
+      Array<{ roleName: string; canExecute: boolean }>
+    >`
+      select role_name as "roleName",
+             has_function_privilege(
+               role_name,
+               to_regprocedure('public.issue_password_recovery_grant(text)'),
+               'EXECUTE'
+             ) as "canExecute"
+      from unnest(
+        array['public','anon','authenticated','service_role','axsys_bff']
+      ) role_name
+      order by role_name
+    `
+    expect(privileges).toEqual([
+      { roleName: "anon", canExecute: false },
+      { roleName: "authenticated", canExecute: true },
+      { roleName: "axsys_bff", canExecute: false },
+      { roleName: "public", canExecute: false },
+      { roleName: "service_role", canExecute: false },
+    ])
+  })
+
   it("preserves an explicitly allowlisted private BFF function during db:env hardening", async () => {
     const [schemaState] = await supabaseAdminOwnerSql<[{ existed: boolean }]>`
       select to_regnamespace('private') is not null as existed
@@ -619,6 +678,7 @@ describe("axsys_bff", () => {
     "private.auth_session_controls",
     "private.auth_user_session_cutoffs",
     "private.auth_password_operations",
+    "private.password_recovery_grants",
   ] as const)("cannot read Task 6 table %s directly", async (relation) => {
     const [catalog] = await postgresOwnerSql<[{ exists: boolean }]>`
       select to_regclass(${relation}) is not null as exists
@@ -673,7 +733,7 @@ describe("axsys_bff", () => {
     ])
   })
 
-  it("has EXECUTE on all and only the thirteen allowlisted boundaries", async () => {
+  it("has EXECUTE on all and only the sixteen allowlisted boundaries", async () => {
     const routines = await postgresOwnerSql<{ routineName: string }[]>`
       select function.proname as "routineName"
       from pg_proc function
@@ -685,12 +745,15 @@ describe("axsys_bff", () => {
 
     expect(routines.map(({ routineName }) => routineName)).toEqual([
       "assert_auth_session",
+      "begin_password_recovery",
       "begin_temporary_password_reset",
       "clear_rate_limit",
+      "complete_password_recovery",
       "complete_temporary_password_change",
       "complete_temporary_password_reset",
       "consume_rate_limit",
       "fail_closed_login_session",
+      "fail_password_recovery",
       "fail_temporary_password_reset",
       "register_auth_session",
       "revoke_sessions_and_write_logout",

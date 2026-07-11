@@ -119,8 +119,8 @@ select results_eq(
     from private.rate_limit_policies
     order by bucket$$,
   $$values
-    ('forgot-account-volume', 3, 3600, 60, false),
-    ('forgot-ip-volume', 10, 900, 60, false),
+    ('forgot-account-volume', 3, 3600, 3600, false),
+    ('forgot-ip-volume', 10, 900, 3600, false),
     ('login-account-failure', 5, 900, 900, true),
     ('login-ip-volume', 30, 900, 1800, false),
     ('reauth-account-failure', 5, 900, 900, true),
@@ -684,19 +684,22 @@ select results_eq(
     order by function.oid::regprocedure::text$$,
   $$values
     ('private.assert_auth_session(uuid,uuid)'),
+    ('private.begin_password_recovery(text,uuid)'),
     ('private.begin_temporary_password_reset(uuid,uuid,uuid,uuid)'),
     ('private.clear_rate_limit(text,text)'),
+    ('private.complete_password_recovery(uuid,uuid)'),
     ('private.complete_temporary_password_change(uuid,uuid,uuid)'),
     ('private.complete_temporary_password_reset(uuid,uuid,uuid,uuid)'),
     ('private.consume_rate_limit(text,text,integer,integer,integer)'),
     ('private.fail_closed_login_session(uuid,uuid,text,uuid)'),
+    ('private.fail_password_recovery(uuid,text,uuid)'),
     ('private.fail_temporary_password_reset(uuid,uuid,uuid,text,uuid)'),
     ('private.register_auth_session(uuid,uuid,boolean)'),
     ('private.revoke_sessions_and_write_logout(uuid,uuid,uuid,text,text)'),
     ('private.rotate_app_session_after_reauthentication(uuid,uuid,uuid,uuid)'),
     ('private.write_authenticated_audit_event(uuid,uuid,text,text,uuid,audit_outcome,text,uuid,text,text,jsonb)'),
     ('private.write_security_event(text,uuid,text,text,audit_outcome,text,uuid,jsonb)')$$,
-  'axsys_bff recebe exatamente treze EXECUTEs efetivos, incluindo memberships'
+  'axsys_bff recebe exatamente dezesseis EXECUTEs efetivos'
 );
 select results_eq(
   $$select role_name::text collate "default",
@@ -848,7 +851,7 @@ insert into private.rate_limit_buckets (
 select results_eq(
   $$select allowed, attempts, retry_after_seconds
     from private.consume_rate_limit(
-      'forgot-account-volume', repeat('a', 64), 3, 3600, 60
+      'forgot-account-volume', repeat('a', 64), 3, 3600, 3600
     )$$,
   $$values (true, 1, 0)$$,
   'bloco expirado reinicia a janela mesmo quando a janela antiga ainda não expirou'
@@ -887,8 +890,8 @@ select results_eq(
         ('login-account-failure', 5, 900, 900, repeat('1', 64)),
         ('reauth-ip-volume', 20, 900, 1800, repeat('2', 64)),
         ('reauth-account-failure', 5, 900, 900, repeat('3', 64)),
-        ('forgot-ip-volume', 10, 900, 60, repeat('4', 64)),
-        ('forgot-account-volume', 3, 3600, 60, repeat('5', 64))
+        ('forgot-ip-volume', 10, 900, 3600, repeat('4', 64)),
+        ('forgot-account-volume', 3, 3600, 3600, repeat('5', 64))
     ), decisions as materialized (
       select policy.bucket, policy.attempt_limit, policy.block_seconds,
              sequence.number, decision.allowed, decision.attempts,
@@ -912,8 +915,8 @@ select results_eq(
     group by bucket
     order by bucket$$,
   $$values
-    ('forgot-account-volume', 3, 1, 4, 60),
-    ('forgot-ip-volume', 10, 1, 11, 60),
+    ('forgot-account-volume', 3, 1, 4, 3600),
+    ('forgot-ip-volume', 10, 1, 11, 3600),
     ('login-account-failure', 5, 1, 6, 900),
     ('login-ip-volume', 30, 1, 31, 1800),
     ('reauth-account-failure', 5, 1, 6, 900),

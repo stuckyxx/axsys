@@ -339,4 +339,54 @@ export const bffDb = {
       )
     `
   },
+
+  async beginPasswordRecovery(input: {
+    grantHash: string
+    correlationId: string
+  }): Promise<{ operationId: string; userId: string; sessionId: string }> {
+    const sql = await getSql()
+    const [row] = await sql<
+      [{ operationId: string; userId: string; sessionId: string }]
+    >`
+      select operation_id as "operationId",
+             user_id as "userId",
+             session_id as "sessionId"
+      from private.begin_password_recovery(
+        ${input.grantHash},
+        ${input.correlationId}::uuid
+      )
+    `
+    return row
+  },
+
+  async completePasswordRecovery(input: {
+    operationId: string
+    correlationId: string
+  }): Promise<void> {
+    const sql = await getSql()
+    await sql`
+      select private.complete_password_recovery(
+        ${input.operationId}::uuid,
+        ${input.correlationId}::uuid
+      )
+    `
+  },
+
+  async failPasswordRecovery(input: {
+    operationId: string
+    reasonCode:
+      | "AUTH_PROVIDER_FAILURE"
+      | "AUTH_COMPLETION_FAILURE"
+      | "AUTH_CALL_NOT_ATTEMPTED"
+    correlationId: string
+  }): Promise<void> {
+    const sql = await getSql()
+    await sql`
+      select private.fail_password_recovery(
+        ${input.operationId}::uuid,
+        ${input.reasonCode},
+        ${input.correlationId}::uuid
+      )
+    `
+  },
 }

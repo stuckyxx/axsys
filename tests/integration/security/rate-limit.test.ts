@@ -170,7 +170,7 @@ describe("rate-limit security wrapper", () => {
     ])
     expect(blocked).toMatchObject({ allowed: false, attempts: 4 })
     expect(blocked.retryAfterSeconds).toBeGreaterThan(0)
-    expect(blocked.retryAfterSeconds).toBeLessThanOrEqual(60)
+    expect(blocked.retryAfterSeconds).toBeLessThanOrEqual(3_600)
   })
 
   it("serializes parallel calls so exactly five login account failures are allowed", async () => {

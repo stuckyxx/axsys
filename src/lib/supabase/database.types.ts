@@ -440,7 +440,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      issue_password_recovery_grant: {
+        Args: { p_grant_hash: string }
+        Returns: string
+      }
     }
     Enums: {
       audit_outcome: "success" | "denied" | "failure"
