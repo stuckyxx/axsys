@@ -520,6 +520,26 @@ describe.sequential("identity invariants under concurrent writes", () => {
     let sessionGateHeld = false
     let platformAttempt: Promise<Outcome> | undefined
     let membershipAttempt: Promise<Outcome> | undefined
+    let readyCount = 0
+    let reportBothReady: (() => void) | undefined
+    let releaseStart: (() => void) | undefined
+    let startReleased = false
+    const bothReady = new Promise<void>((resolve) => {
+      reportBothReady = resolve
+    })
+    const start = new Promise<void>((resolve) => {
+      releaseStart = resolve
+    })
+    const waitAtStart = async (): Promise<void> => {
+      readyCount += 1
+      if (readyCount === 2) reportBothReady?.()
+      await start
+    }
+    const releaseBarrier = (): void => {
+      if (startReleased) return
+      startReleased = true
+      releaseStart?.()
+    }
     try {
       await cleanupFixtures(workerA)
       await createUser(workerA, USERS.swapPlatform, "swap-platform@example.test")
@@ -546,13 +566,45 @@ describe.sequential("identity invariants under concurrent writes", () => {
       `
       sessionGateHeld = true
 
-      membershipAttempt = runTransaction(workerB, () => workerB`
-        update public.company_memberships
-        set user_id = ${USERS.swapPlatform}::uuid
-        where id = ${MEMBERSHIPS.swap}::uuid
-      `)
-      await waitForAdvisoryBlock(workerA, workerBPid, WORKER_B_NAME)
+      platformAttempt = runTransaction(workerA, async () => {
+        await waitAtStart()
+        return workerA`
+          update public.platform_roles
+          set user_id = ${USERS.swapMember}::uuid
+          where user_id = ${USERS.swapPlatform}::uuid
+        `
+      })
+      membershipAttempt = runTransaction(workerB, async () => {
+        await waitAtStart()
+        return workerB`
+          update public.company_memberships
+          set user_id = ${USERS.swapPlatform}::uuid
+          where id = ${MEMBERSHIPS.swap}::uuid
+        `
+      })
+      expect(platformAttempt).toBeDefined()
+      expect(membershipAttempt).toBeDefined()
 
+      const readinessTimeout = new AbortController()
+      try {
+        await Promise.race([
+          bothReady,
+          delay(WAIT_TIMEOUT_MS, undefined, {
+            signal: readinessTimeout.signal,
+            ref: false,
+          }).then(() => {
+            throw new Error("Both identity updates did not reach the start barrier")
+          }),
+        ])
+      } finally {
+        readinessTimeout.abort()
+      }
+      releaseBarrier()
+
+      const platformOutcome = await platformAttempt
+      expectConflict(platformOutcome, "identity_scope_conflict")
+
+      await waitForAdvisoryBlock(workerA, workerBPid, WORKER_B_NAME)
       const [membershipLocks] = await workerA<
         [{ granted: number; waiting: number }]
       >`
@@ -564,14 +616,6 @@ describe.sequential("identity invariants under concurrent writes", () => {
           and locktype = 'advisory'
       `
       expect(membershipLocks).toEqual({ granted: 0, waiting: 1 })
-
-      platformAttempt = runTransaction(workerA, () => workerA`
-        update public.platform_roles
-        set user_id = ${USERS.swapMember}::uuid
-        where user_id = ${USERS.swapPlatform}::uuid
-      `)
-      const platformOutcome = await platformAttempt
-      expectConflict(platformOutcome, "identity_scope_conflict")
 
       await releaseSessionGate(workerA, USERS.swapPlatform, IDENTITY_LOCK_SEED)
       sessionGateHeld = false
@@ -592,6 +636,7 @@ describe.sequential("identity invariants under concurrent writes", () => {
         membershipUser: USERS.swapMember,
       })
     } finally {
+      releaseBarrier()
       await finalizeGateRace({
         workerATransactionOpen: false,
         sessionGateHeld,
