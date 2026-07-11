@@ -1985,16 +1985,92 @@ git commit -m "feat: add tenant identity schema"
 **Files:**
 - Create via CLI: `supabase/migrations/<CLI_TIMESTAMP>_foundation_security_control.sql`
 - Create: `supabase/tests/database/02_security_control.test.sql`
-- Modify: `tests/integration/db/bff-role.test.ts`
+- Modify: `supabase/tests/database/01_foundation_identity.test.sql`
+- Modify: `supabase/tests/database/helpers/fixtures.inc`
+- Modify: `src/lib/db/bff.ts`
+- Modify: `tests/unit/db/bff.test.ts`
+- Extend, never replace: `tests/integration/db/bff-role.test.ts`
+- Create: `tests/integration/db/security-control-concurrency.test.ts`
+- Extend, never replace: `tests/integration/db/bff-default-acl.test.ts`
+- Modify generated: `src/lib/supabase/database.types.ts`
+
+#### Contrato vinculante de execução da Task 6
+
+The SQL and TypeScript blocks already present in this task are historical, illustrative scaffolding. They are not copy-paste implementations and do not override this subsection. If an illustrative block, assertion count, function body, grant, filename, or later task conflicts with this subsection, this subsection is authoritative. Implement RED → observe the intended failure → minimal GREEN → refactor, and create the migration only with `npx supabase migration new foundation_security_control`; never invent or reuse a timestamp. The final pgTAP file uses `no_plan()` because the complete catalog/ACL/behavior contract is intentionally larger than the original 11/15 smoke assertions.
+
+**Frozen rate-limit policy.** Create owner-only `private.rate_limit_policies(bucket text primary key, attempt_limit integer, window_seconds integer, block_seconds integer, clear_on_success boolean)` containing exactly these six rows, and make `private.rate_limit_buckets.bucket` reference it. No application role receives table DML or SELECT:
+
+| bucket | limit | window | block | clear |
+|---|---:|---:|---:|---|
+| `login-ip-volume` | 30 | 900 | 1800 | no |
+| `login-account-failure` | 5 | 900 | 900 | yes |
+| `reauth-ip-volume` | 20 | 900 | 1800 | no |
+| `reauth-account-failure` | 5 | 900 | 900 | yes |
+| `forgot-ip-volume` | 10 | 900 | 60 | no |
+| `forgot-account-volume` | 3 | 3600 | 60 | no |
+
+`private.consume_rate_limit(text,text,integer,integer,integer)` keeps its five-argument signature but rejects NULLs, any key other than lowercase 64-hex, unknown buckets, and any numeric tuple that differs from the frozen row. It must not calculate against a timestamp captured before waiting for a lock. Use a row-lock/retry loop: lock the existing `(bucket,key_hash)` row, capture `clock_timestamp()` only after the lock is acquired, calculate the transition, and retry the insert path after a unique race. Exactly N attempts are allowed and N+1 is blocked; an unexpired block is not cleared merely because the counting window elapsed. Add an `updated_at` cleanup index. `private.clear_rate_limit` validates the same hash grammar and permits only `login-account-failure` and `reauth-account-failure`; IP-volume and forgot-password buckets can never be cleared through the BFF.
+
+**Authoritative session lifecycle and cutoff.** `private.auth_session_controls` uses an explicit `pending → active → revoked` lifecycle. Registration creates only `pending`; pending rows never satisfy `assert_auth_session`, an RLS helper, a guard, or a business writer. The `auth.sessions` row identified by `(id,user_id,created_at)` is authoritative. Use `session_id` as an FK to `auth.sessions(id) on delete cascade` on the pinned Supabase/PostgreSQL schema; the local and linked migration gates must fail rather than silently omit that FK if the expected Auth catalog is absent. Registration takes the per-user transaction advisory lock, locks and validates that Auth row, derives the 8-hour/30-day absolute expiry, and inserts once. Replay may return the original expiry only for the same immutable user, remember-me policy, cutoff, and pending row; it never changes owner/policy/expiry, revives a revoked row, or extends an absolute lifetime.
+
+Create `private.auth_user_session_cutoffs(user_id uuid primary key references auth.users(id) on delete cascade, revoked_before timestamptz not null, updated_at timestamptz not null)` as an owner-only table. Compare `revoked_before` to authoritative `auth.sessions.created_at`; registration rejects an Auth session created at or before the cutoff. `auth_session_controls` has `state private.auth_session_state not null`, `activated_at timestamptz`, and `revoked_at timestamptz`, with a CHECK admitting only: pending with both timestamps NULL; active with activated non-NULL/revoked NULL; or revoked with revoked non-NULL and activated either NULL or ordered no later than revocation. Logout advances the cutoff and revokes all current app-session rows in the same database transaction, so a pre-logout Auth session cannot register late. Every operation that combines identity scope and sessions acquires the Task 5 global identity advisory lock first and the per-user session lock second; no function may reverse that order. In this Task 6 migration, recreate `platform_roles_serialize_identity_invariants` so its statement trigger covers DELETE as well as INSERT/UPDATE, matching the already-serialized membership side and making audit-scope derivation linearizable.
+
+`private.write_authenticated_audit_event` accepts `auth.login` only while the exact actor/session row is pending. It locks and revalidates the Auth session, cutoff, active profile and exactly one authoritative platform-or-active-company identity; sets transaction-local `app.actor_id` only after that proof; inserts the login audit; and changes the same control row to active in one transaction. Any audit/validation failure therefore leaves a non-authorizing pending row, so correctness never depends on a compensating call succeeding. `private.assert_auth_session` and all Task 7 RLS helpers accept active, non-revoked, unexpired, post-cutoff rows only. `private.fail_closed_login_session` revokes only the exact owned pending/active session and is cleanup, not the security boundary that makes pending safe.
+
+Reauthentication requires an unused, different `auth.sessions` ID for the same actor, preserves the old row's remember-me policy, and has one row-lock winner. It creates the new control as active, revokes only the replaced old control, sets `app.actor_id`, and writes `auth.reauthenticated` atomically; other devices remain active. Logout verifies the exact active actor/session, then cutoff + all app-session revocations + `auth.logout` audit are one transaction. Races register/logout, rotate/logout, rotate/rotate, replay/register, and cutoff/register must have one legal winner and no resurrected session.
+
+**Exactly five externally granted audit/session boundaries.** All five are `SECURITY DEFINER`, owned by `postgres`, live in `private`, and have `SET search_path = ''`:
+
+```text
+private.write_authenticated_audit_event(uuid,uuid,text,text,uuid,public.audit_outcome,text,uuid,text,text,jsonb)
+private.write_security_event(text,uuid,text,text,public.audit_outcome,text,uuid,jsonb)
+private.revoke_sessions_and_write_logout(uuid,uuid,uuid,text,text)
+private.fail_closed_login_session(uuid,uuid,text,uuid)
+private.rotate_app_session_after_reauthentication(uuid,uuid,uuid,uuid)
+```
+
+Each exact signature above returns `void`.
+
+Revoke EXECUTE on each exact signature from `PUBLIC`, `anon`, `authenticated`, `service_role`, and `axsys_bff`, then grant only that signature to `axsys_bff`. Apply the same explicit revoke-first rule to `consume_rate_limit`, `clear_rate_limit`, `register_auth_session`, and `assert_auth_session` before their BFF grant. `private.revoke_auth_sessions(uuid,uuid)` and every policy/cutoff/trigger helper remain owner-only with no BFF grant. Its compatibility parameter `p_except_session_id` remains in the signature but v1 rejects every non-NULL value; bulk revocation always advances the cutoff and has no ambiguous survivor semantics. Rotation revokes its one exact old row directly inside its purpose-specific transaction. There is no `bffDb.revokeAuthSessions`, generic SQL caller, dynamic routine name, transaction callback, or raw executor.
+
+After this task, the exact `bffDb` method names are `consumeRateLimit`, `clearRateLimit`, `registerAuthSession`, `assertAuthSession`, `writeAuthenticatedAuditEvent`, `writeSecurityEvent`, `revokeSessionsAndWriteLogout`, `failClosedLoginSession`, and `rotateAppSessionAfterReauthentication`. `consumeRateLimit` returns `Promise<RateLimitDecision>`, `clearRateLimit` returns `Promise<void>` and accepts only the two clearable bucket literals, `registerAuthSession` returns the original absolute expiry as an ISO string, and `assertAuthSession` returns `Promise<boolean>` for active state only. The five writer methods return `Promise<void>`. The SQL compatibility signature of `write_security_event` retains `p_user_id uuid`, but v1 requires it to be NULL and the facade always binds a fixed SQL NULL; the TypeScript method exposes no `userId` input, so pre-auth telemetry cannot attribute an arbitrary profile. Every method maps named fields explicitly and returns no inserted database row or SQL capability.
+
+**Frozen audit/security vocabulary.** The generic authenticated writer accepts only `action='auth.login'`, `resource_type='session'`, NULL `resource_id`, `outcome='success'`, NULL `reason_code`, and metadata `{}` or exactly `{rememberMe:boolean}`. The dedicated boundaries write only `auth.logout` and `auth.reauthenticated`, also against `session`, with NULL resource ID/reason, success outcome, and empty metadata. `fail_closed_login_session` accepts exactly `AUTH_CONTEXT_RESOLUTION_FAILED`, `AUTH_AUDIT_ACTIVATION_FAILED`, or `TEMPORARY_PASSWORD_EXPIRED`.
+
+The pre-auth writer accepts only these event/outcome/reason combinations:
+
+- `auth.login.failed`: `denied/AUTH_INVALID_CREDENTIALS` or `failure/AUTH_PROVIDER_FAILURE`;
+- `auth.login.rate_limited`: `denied/IP_RATE_LIMITED` or `denied/ACCOUNT_RATE_LIMITED`;
+- `auth.reauthentication.failed`: `denied/AUTH_INVALID_CREDENTIALS` or `failure/AUTH_PROVIDER_FAILURE`;
+- `auth.reauthentication.rate_limited`: `denied/IP_RATE_LIMITED` or `denied/ACCOUNT_RATE_LIMITED`;
+- `auth.password_recovery.requested`: `success` with NULL reason;
+- `auth.password_recovery.failed`: `failure/AUTH_PROVIDER_FAILURE`;
+- `auth.password_recovery.rate_limited`: `denied/IP_RATE_LIMITED` or `denied/ACCOUNT_RATE_LIMITED`.
+
+For those events metadata is empty or contains only integer `attempts` and/or `retryAfterSeconds`; both are nonnegative, `attempts <= 1000000`, and `retryAfterSeconds <= 86400`. Reject unknown keys, nesting, arrays, strings, non-integers, and payloads whose canonical UTF-8 JSON exceeds 16 KiB. Rebuild the accepted JSON from the allowlist in SQL rather than persisting the caller object. Audit metadata has the same 16 KiB SQL cap. Hash columns remain lowercase 64-hex and no event accepts plaintext email, IP, user agent, token, session ID, Auth error, request body, or arbitrary identifier in metadata.
+
+**Tables, constraints, indexes, RLS, and ACLs.** Keep the three public enums from the illustrative schema and add the private session lifecycle/cutoff objects required above. Replace the zero-UUID idempotency sentinel with `UNIQUE NULLS NOT DISTINCT (actor_user_id,company_id,operation,key_hash)`. A processing idempotency row has NULL response status/body/completed time. A terminal transition is one-way and single-write; immutable identity/request/expiry fields never change, `completed_at >= created_at`, and serialized response JSON is capped at 64 KiB. An owner-only trigger rejects terminal rewrites, terminal→processing, and changes to actor/company/operation/key/request/created/expiry.
+
+`audit_events` and `security_events` are append-only for application/database routines: reject UPDATE, DELETE, and TRUNCATE with the stable append-only error. This does not claim protection from a malicious PostgreSQL superuser, who can disable/drop triggers; production retention must use a separately approved owner maintenance path. Enable and FORCE RLS on `audit_events`, `security_events`, and `idempotency_keys`, create zero policies in Task 6, and revoke every table privilege from `PUBLIC`, `anon`, `authenticated`, `service_role`, and `axsys_bff`. Do the same for the private tables. ACL assertions must expand effective ACLs and cover SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, and PostgreSQL 17 `MAINTAIN`, not merely inspect `information_schema.role_table_grants`.
+
+Create FK-supporting full indexes for `audit_events.actor_user_id`, `audit_events.company_id`, `security_events.user_id`, `idempotency_keys.company_id`, and `auth_session_controls.user_id`. Keyset indexes are exactly tenant audit `(company_id,occurred_at desc,id desc) where scope='tenant'`, platform audit `(occurred_at desc,id desc) where scope='platform'`, and security event `(event_type,occurred_at desc,id desc)`. Retain idempotency expiry, active-session, pending-session/cutoff, rate `updated_at`, and correlation lookup indexes. The migration starts with the same owner/default-ACL/private-schema precondition used by Task 5; catalog tests require every new table/type/function/trigger owner to be `postgres`, every private function to have an empty fixed search path, and postgres global/public/private defaults to remain fail-closed.
+
+**Required RED/GREEN evidence.** `02_security_control.test.sql` uses `no_plan()` and freezes exact enums, columns, constraints, owners, RLS flags, zero policies, signatures, function security/search-path, trigger events, indexes, and expanded ACLs. Behavioral assertions cover every frozen tuple, N/N+1, stale counting window under an active block, invalid/mismatched tuple, both allowed clears and every forbidden clear; 8h/30d, Auth-row mismatch, cutoff, strict retry, no resurrection, pending nonauthorization, activation+audit, wrong actor/session, platform/tenant scope derivation, suspended/inactive/archive rejection, metadata/reason/action rejection, rotation/logout/fail-closed isolation, idempotency transitions, and UPDATE/DELETE/TRUNCATE append-only behavior. Every rejected call compares before/after rows and audit/security counts so partial residue fails.
+
+Extend `helpers/fixtures.inc` with `test_helpers.create_auth_session(p_session_id uuid,p_user_id uuid,p_created_at timestamptz default clock_timestamp())`, which inserts the matching authoritative `auth.sessions` fixture and no application control row. Update `01_foundation_identity.test.sql` to expect DELETE on `platform_roles_serialize_identity_invariants`; never edit the already-applied Task 5 migration. The complete database suite after Task 6 must therefore validate the strengthened trigger rather than freeze its superseded pre-Task-6 definition.
+
+`security-control-concurrency.test.ts` runs real independent PostgreSQL 17 connections and proves N/N+1 serialization, clock capture after a waited row lock, insert race, register/logout, rotate/rotate, rotate/logout, cutoff/register, and exactly-one audit/activation with bounded timeouts and no deadlock. `bff-role.test.ts` is extended in place: preserve all current role flags, memberships, owner/default-ACL probes, and five Task 5 table denials, then add direct SQLSTATE `42501` denial for every new public and private table—including rate policy, bucket, session-control, and cutoff tables—plus positive calls to every and only allowlisted function. `bff-default-acl.test.ts` is also extended in place; preserve its current probes, cover PUBLIC/API/BFF table/function/sequence/MAINTAIN drift under both `postgres` and `supabase_admin`, run the real hardener, and leave zero objects/grants even on failure. `tests/unit/db/bff.test.ts` freezes the nine methods and exact static routine names and continues to reject raw/dynamic SQL capability.
+
+Task 7 must consume only active session rows in authorization helpers, and Task 11 must activate the pending row only through the atomic `auth.login` writer before treating login as successful. Plan 06 may add invalidation triggers/contexts but must preserve global-identity-before-user-session lock order, cutoff semantics, the five exact grants, and transaction-local verified `app.actor_id`; it may not add a service-role exception.
 
 - [ ] **Step 1: Escrever o pgTAP RED dos controles**
 
-Create `supabase/tests/database/02_security_control.test.sql`:
+Start `supabase/tests/database/02_security_control.test.sql` with this illustrative RED excerpt, then add every structural/ACL/behavior assertion from the binding contract before implementation:
 
 ```sql
 begin;
 \ir helpers/fixtures.inc
-select plan(11);
+select no_plan();
 select has_type('public', 'audit_scope');
 select has_type('public', 'audit_outcome');
 select has_type('public', 'idempotency_state');
@@ -2012,7 +2088,7 @@ rollback;
 
 Run: `npm run db:test -- supabase/tests/database/02_security_control.test.sql`
 
-Expected: FAIL em tipos, tabelas e funções ausentes.
+Expected: FAIL for the missing security-control types/tables/functions and the binding assertions; the RED is not complete if only the historical smoke assertions fail.
 
 - [ ] **Step 2: Gerar a migration sem fabricar timestamp**
 
@@ -2022,7 +2098,7 @@ Expected: CLI imprime o caminho `supabase/migrations/<timestamp>_foundation_secu
 
 - [ ] **Step 3: Implementar tabelas e índices de controle**
 
-Put this SQL first in the generated migration:
+The following historical schema excerpt is illustrative only. Implement the stricter columns, lifecycle, constraints, indexes, RLS, ACL, owner, and cutoff contract above in the generated migration; do not copy this excerpt unchanged:
 
 ```sql
 create type public.audit_scope as enum ('platform', 'tenant');
@@ -2136,7 +2212,7 @@ revoke all on private.rate_limit_buckets, private.auth_session_controls
 
 - [ ] **Step 4: Implementar funções atômicas privadas e grants allowlisted**
 
-Append to the same migration:
+The following function bodies are historical algorithm sketches only. Implement the lock-after-wait rate algorithm, frozen policy tuples, pending activation, cutoff, exact grants, and five boundaries from the binding contract instead of copying them unchanged:
 
 ```sql
 create function private.consume_rate_limit(
@@ -2314,11 +2390,11 @@ npm run db:test -- supabase/tests/database/02_security_control.test.sql
 npm run db:lint
 ```
 
-Expected: 11 testes PASS e lint sem warnings.
+Expected: every assertion discovered by `no_plan()` passes and lint reports no warnings.
 
 - [ ] **Step 6: Fortalecer o teste do papel restrito**
 
-Replace `tests/integration/db/bff-role.test.ts` with:
+Extend the existing `tests/integration/db/bff-role.test.ts`; never replace or delete its Task 1–5 role flags, membership, owner/default-ACL, hardener, schema, and base-table assertions. The following is only an illustrative fragment for the new positive/negative cases:
 
 ```ts
 import postgres from "postgres"
@@ -2354,14 +2430,22 @@ describe("axsys_bff", () => {
 
 Run: `npm run test:integration -- tests/integration/db/bff-role.test.ts`
 
-Expected: 2 tests PASS. A tentativa de tabela falha, e somente a função allowlisted funciona.
+Expected: the complete pre-existing suite plus direct denial of every new public/private table and the exact allowlisted-function cases pass.
 
 - [ ] **Step 7: Testar expiração 8h/30d e append-only no pgTAP**
 
-Increase `plan(11)` to `plan(15)` and add before `finish()`:
+Keep `no_plan()` and add these time-bound session checks as a small subset of the full lifecycle/cutoff/activation assertions required above before `finish()`:
 
 ```sql
 select test_helpers.create_auth_user('20000000-0000-4000-8000-000000000001', 'session@example.test');
+select test_helpers.create_auth_session(
+  '90000000-0000-4000-8000-000000000001',
+  '20000000-0000-4000-8000-000000000001'
+);
+select test_helpers.create_auth_session(
+  '90000000-0000-4000-8000-000000000002',
+  '20000000-0000-4000-8000-000000000001'
+);
 select ok(
   private.register_auth_session(
     '90000000-0000-4000-8000-000000000001',
@@ -2395,7 +2479,7 @@ select is(
 );
 ```
 
-Run the file again. Expected: 15 tests PASS.
+Run the file again. Expected: every assertion discovered by `no_plan()` passes, including append-only UPDATE/DELETE/TRUNCATE and zero-residue failures.
 
 - [ ] **Step 8: Gerar types, advisors e commit**
 
@@ -2410,7 +2494,7 @@ npm run typecheck
 Expected: types atualizados; advisors sem findings de segurança não resolvidos. Se o advisor sinalizar `security_definer`, confirme `search_path = ''`, schema `private`, revogação de `PUBLIC` e grant nominal antes de aceitar.
 
 ```bash
-git add supabase/migrations/*_foundation_security_control.sql supabase/tests/database/02_security_control.test.sql tests/integration/db/bff-role.test.ts src/lib/supabase/database.types.ts
+git add supabase/migrations/*_foundation_security_control.sql supabase/tests/database/01_foundation_identity.test.sql supabase/tests/database/02_security_control.test.sql supabase/tests/database/helpers/fixtures.inc src/lib/db/bff.ts tests/unit/db/bff.test.ts tests/integration/db/bff-role.test.ts tests/integration/db/security-control-concurrency.test.ts tests/integration/db/bff-default-acl.test.ts src/lib/supabase/database.types.ts
 git commit -m "feat: add audit security and session controls"
 ```
 
@@ -3295,18 +3379,37 @@ describe("mutation security", () => {
 Create `tests/integration/security/rate-limit.test.ts`:
 
 ```ts
-import { describe, expect, it } from "vitest"
+import postgres from "postgres"
+import { afterAll, describe, expect, it } from "vitest"
 import { consumeRateLimit } from "@/lib/security/rate-limit"
+import { hashSensitive } from "@/lib/security/redact"
+
+const ownerSql = postgres(process.env.DATABASE_URL!, { max: 1, prepare: false })
+afterAll(() => ownerSql.end())
 
 describe("consumeRateLimit", () => {
   it("permite três tentativas e bloqueia atomicamente a quarta", async () => {
-    const key = `integration-${crypto.randomUUID()}`
-    expect((await consumeRateLimit("test-login", key, 3, 60, 60)).allowed).toBe(true)
-    expect((await consumeRateLimit("test-login", key, 3, 60, 60)).allowed).toBe(true)
-    expect((await consumeRateLimit("test-login", key, 3, 60, 60)).allowed).toBe(true)
-    const blocked = await consumeRateLimit("test-login", key, 3, 60, 60)
-    expect(blocked.allowed).toBe(false)
-    expect(blocked.retryAfterSeconds).toBeGreaterThan(0)
+    const rawKey = `integration-${crypto.randomUUID()}`
+    const keyHash = hashSensitive(rawKey)
+    try {
+      expect((await consumeRateLimit("forgot-account-volume", rawKey, 3, 3600, 60)).allowed).toBe(true)
+      expect((await consumeRateLimit("forgot-account-volume", rawKey, 3, 3600, 60)).allowed).toBe(true)
+      expect((await consumeRateLimit("forgot-account-volume", rawKey, 3, 3600, 60)).allowed).toBe(true)
+      const blocked = await consumeRateLimit("forgot-account-volume", rawKey, 3, 3600, 60)
+      expect(blocked.allowed).toBe(false)
+      expect(blocked.retryAfterSeconds).toBeGreaterThan(0)
+    } finally {
+      await ownerSql`
+        delete from private.rate_limit_buckets
+        where bucket = 'forgot-account-volume' and key_hash = ${keyHash}
+      `
+      const [residue] = await ownerSql<[{ count: number }]>`
+        select count(*)::integer as count
+        from private.rate_limit_buckets
+        where bucket = 'forgot-account-volume' and key_hash = ${keyHash}
+      `
+      expect(residue.count).toBe(0)
+    }
   })
 })
 ```
@@ -3712,21 +3815,21 @@ Run the three files. Expected: FAIL porque handlers e serviços ainda não exist
 
 - [ ] **Step 2: Implementar writers allowlisted pelo BFF sem table CRUD**
 
-Create `src/modules/audit/server/write-audit-event.ts` using the frozen `AuthenticatedAuditEventInput` contract. Map each camelCase field explicitly, run `redactRecord(input.metadata ?? {})`, and call only `bffDb.writeAuthenticatedAuditEvent` with the verified actor/session. Scope/company are not inputs. Export `writeAuditEvent(input): Promise<void>` and reject any action/metadata outside the shared allowlist.
+Create `src/modules/audit/server/write-audit-event.ts` using the frozen `AuthenticatedAuditEventInput` contract. Map each camelCase field explicitly, run `redactRecord(input.metadata ?? {})`, and call only `bffDb.writeAuthenticatedAuditEvent` with the verified actor/session. Scope/company are not inputs. Export `writeAuditEvent(input): Promise<void>` and reject any action/metadata outside the shared allowlist. In Plan 01 the sole generic action is `auth.login`, and that database call is also the pending→active transition; returning from this writer is the activation acknowledgment.
 
-Create `write-security-event.ts` with input `{eventType,userId?,emailHash?,ipHash?,outcome,reasonCode?,correlationId,metadata?}` and the same explicit mapping/redaction through only `bffDb.writeSecurityEvent`. Neither function imports the Supabase admin client, logs input, returns inserted data, or has a generic table/function escape hatch. A source test rejects `.from('audit_events')`, `.from('security_events')`, or service-role imports.
+Create `write-security-event.ts` with input `{eventType,emailHash?,ipHash?,outcome,reasonCode?,correlationId,metadata?}` and the same explicit mapping/redaction through only `bffDb.writeSecurityEvent`. The TypeScript boundary has no `userId`; the compatibility SQL argument is always bound to NULL and SQL rejects any non-NULL value. Neither function imports the Supabase admin client, logs input, returns inserted data, or has a generic table/function escape hatch. A source test rejects `.from('audit_events')`, `.from('security_events')`, service-role imports, or a `userId` field.
 
 - [ ] **Step 3: Implementar login sem enumeração e registrar sessão 8h/30d**
 
 `src/modules/auth/server/login.ts` must:
 
 1. parse only `loginSchema` output and derive IP with `getClientIp`;
-2. atomically consume `login-ip-volume` (30 attempts/15 minutes, then 30-minute block) on every attempt and `login-account-failure` (5 attempts/15 minutes, then 15-minute block) before Auth; the UPSERT serializes concurrent attempts and each configured limit allows exactly N attempts, blocking N+1;
+2. atomically consume `login-ip-volume` (30 attempts/15 minutes, then 30-minute block) on every attempt and `login-account-failure` (5 attempts/15 minutes, then 15-minute block) before Auth; the Task 6 row-lock/retry loop serializes concurrent attempts, captures time after lock acquisition, and each frozen limit allows exactly N attempts, blocking N+1;
 3. call the request-bound `createServerSupabase().auth.signInWithPassword({email,password})`;
 4. on any Auth error, write only hashes to `security_events`, wait `progressiveDelayMs(attempts)` through an injected `sleep` dependency, and throw the same `AUTH_INVALID_CREDENTIALS` error;
-5. on successful Auth, clear only the account-failure bucket, never the IP-volume bucket, then call `getClaims()`, reject missing `sub/session_id`, and call `bffDb.registerAuthSession(session_id,sub,rememberMe)`;
-6. resolve `getAccessContext`; expired temporary password revokes the registered session, signs out globally and returns `TEMPORARY_PASSWORD_EXPIRED`; forced change returns `/change-password`; platform returns `/platform`; company returns `/app/dashboard`;
-7. write a scoped `auth.login` audit through the restricted authenticated BFF function only after the effective context is known. If context resolution or audit fails after session registration, call `failClosedLoginSession`, sign out/clear cookies, and return a stable failure; never leave a usable half-completed login.
+5. on successful Auth, clear only the account-failure bucket, never the IP-volume bucket, then call `getClaims()`, reject missing `sub/session_id`, and call `bffDb.registerAuthSession(session_id,sub,rememberMe)`; this insert is pending and authorizes no RLS/BFF operation;
+6. immediately call `writeAuditEvent` for the frozen `auth.login` event. Its SQL boundary revalidates Auth session, cutoff and authoritative identity, rejects an expired temporary password, and commits the audit plus pending→active transition atomically. On rejection, the row remains pending/non-authorizing; call `failClosedLoginSession` only for cleanup, sign out/clear cookies, and return the stable context/expiry failure;
+7. only after that activation acknowledgment resolve `getAccessContext`; forced change returns `/change-password`, platform returns `/platform`, and company returns `/app/dashboard`. No route acknowledges login before activation, and no correctness claim depends on compensating revocation of a pending row.
 
 The function returns `{ redirectTo: '/platform' | '/app/dashboard' | '/change-password' }`; no client-supplied navigation value reaches it.
 
