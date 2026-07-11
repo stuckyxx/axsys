@@ -6,7 +6,10 @@ const baseURL = `http://127.0.0.1:${port}`
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  testMatch: "**/security/foundation-production.spec.ts",
+  testMatch: [
+    "**/security/foundation-production.spec.ts",
+    "**/theme/theme.spec.ts",
+  ],
   fullyParallel: false,
   forbidOnly: isCI,
   failOnFlakyTests: true,
@@ -33,6 +36,7 @@ export default defineConfig({
     timeout: 120_000,
     env: {
       APP_ORIGIN: baseURL,
+      TRUST_PROXY: "true",
     },
   },
 })

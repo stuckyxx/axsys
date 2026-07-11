@@ -17,6 +17,7 @@ import { PasswordForm } from "@/modules/auth/ui/password-form"
 const mocks = vi.hoisted(() => ({
   createServerSupabase: vi.fn(),
   getAccessContext: vi.fn(),
+  portalNavigate: vi.fn(),
   redirect: vi.fn((location: string): never => {
     throw new Error(`REDIRECT:${location}`)
   }),
@@ -29,6 +30,9 @@ vi.mock("next/navigation", () => ({
 }))
 vi.mock("@/modules/auth/server/get-access-context", () => ({
   getAccessContext: mocks.getAccessContext,
+}))
+vi.mock("@/modules/auth/ui/authenticated-navigation", () => ({
+  navigateToAuthenticatedPortal: mocks.portalNavigate,
 }))
 vi.mock("@/lib/supabase/server", () => ({
   createServerSupabase: mocks.createServerSupabase,
@@ -191,7 +195,9 @@ describe("Task 14 authentication forms", () => {
     })
 
     mutation.resolve(Response.json({ redirectTo: "/platform" }))
-    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/platform"))
+    await waitFor(() =>
+      expect(mocks.portalNavigate).toHaveBeenCalledWith("/platform"),
+    )
   })
 
   it("never follows a redirect outside the server response allowlist", async () => {
@@ -210,7 +216,7 @@ describe("Task 14 authentication forms", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Não foi possível concluir o acesso.",
     )
-    expect(mocks.replace).not.toHaveBeenCalled()
+    expect(mocks.portalNavigate).not.toHaveBeenCalled()
   })
 
   it("completes loading and navigation after the React StrictMode effect replay", async () => {
@@ -228,7 +234,9 @@ describe("Task 14 authentication forms", () => {
     await user.type(screen.getByLabelText("Senha"), "senha-segura")
     await user.click(screen.getByRole("button", { name: "Entrar" }))
 
-    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/platform"))
+    await waitFor(() =>
+      expect(mocks.portalNavigate).toHaveBeenCalledWith("/platform"),
+    )
     expect(screen.getByRole("button", { name: "Entrar" })).toBeEnabled()
   })
 
@@ -260,11 +268,13 @@ describe("Task 14 authentication forms", () => {
       "Recarregue a proteção da solicitação.",
     )
     expect(fetch).toHaveBeenCalledTimes(2)
-    expect(mocks.replace).not.toHaveBeenCalled()
+    expect(mocks.portalNavigate).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole("button", { name: "Entrar" }))
 
-    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/platform"))
+    await waitFor(() =>
+      expect(mocks.portalNavigate).toHaveBeenCalledWith("/platform"),
+    )
     expect(fetch).toHaveBeenCalledTimes(4)
     expect(fetch).toHaveBeenNthCalledWith(3, "/api/auth/csrf", {
       cache: "no-store",

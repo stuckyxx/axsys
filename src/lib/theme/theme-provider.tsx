@@ -5,12 +5,16 @@ import type { ReactNode } from "react"
 
 type AxsysThemeProviderProps = {
   children: ReactNode
+  forcedTheme?: "dark" | "light"
+  nonce?: string
   userId: string
   initialTheme?: "dark" | "light"
 }
 
 export function AxsysThemeProvider({
   children,
+  forcedTheme,
+  nonce,
   userId,
   initialTheme = "dark",
 }: AxsysThemeProviderProps) {
@@ -19,7 +23,9 @@ export function AxsysThemeProvider({
       attribute="class"
       defaultTheme={initialTheme}
       enableSystem={false}
+      forcedTheme={forcedTheme}
       key={userId}
+      nonce={nonce}
       storageKey={`axsys-theme:${userId}`}
     >
       {children}

@@ -2,7 +2,6 @@
 
 import { zodResolver } from "@hookform/resolvers/zod"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { Controller, useForm } from "react-hook-form"
 import type { z } from "zod"
@@ -13,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { loginSchema } from "@/modules/auth/schemas/auth-schemas"
+import { navigateToAuthenticatedPortal } from "@/modules/auth/ui/authenticated-navigation"
 import { useSecureMutation } from "@/modules/auth/ui/use-secure-mutation"
 
 type LoginFormValues = z.input<typeof loginSchema>
@@ -35,7 +35,6 @@ function loginErrorMessage(
 }
 
 export function LoginForm() {
-  const router = useRouter()
   const [responseError, setResponseError] = useState<string | null>(null)
   const { submit, pending, error, fieldErrors } =
     useSecureMutation<LoginPayload>("/api/auth/login")
@@ -72,7 +71,7 @@ export function LoginForm() {
       setResponseError(INVALID_RESPONSE_ERROR)
       return
     }
-    router.replace(redirectTo)
+    navigateToAuthenticatedPortal(redirectTo)
   }
 
   const emailError = errors.email
