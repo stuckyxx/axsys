@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { TEST_FILE_SERVICE_ENV } from "../../helpers/file-service-env"
 
 const { createClientMock } = vi.hoisted(() => ({
   createClientMock: vi.fn(),
@@ -20,6 +21,7 @@ const VALID_ENV = {
   CSRF_SECRET: "c".repeat(32),
   SECURITY_HASH_PEPPER: "p".repeat(32),
   TRUST_PROXY: "false",
+  ...TEST_FILE_SERVICE_ENV,
 } as const
 
 function stubValidEnv(): void {

@@ -33,6 +33,7 @@ import {
   type RateLimitBucket,
 } from "@/lib/security/rate-limit"
 import { NO_STORE_HEADERS } from "@/lib/security/no-store"
+import { TEST_FILE_SERVICE_ENV } from "../../helpers/file-service-env"
 
 const rateLimitMocks = vi.hoisted(() => ({
   clearRateLimit: vi.fn(),
@@ -80,6 +81,9 @@ function stubServerEnv(
   vi.stubEnv("SECURITY_HASH_PEPPER", "p".repeat(32))
   vi.stubEnv("TRUST_PROXY", trustProxy)
   vi.stubEnv("VERCEL", undefined)
+  for (const [name, value] of Object.entries(TEST_FILE_SERVICE_ENV)) {
+    vi.stubEnv(name, value)
+  }
 }
 
 function sourceFiles(directory: string): string[] {

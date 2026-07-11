@@ -25,6 +25,9 @@ type CanonicalEnvironment = {
   BFF_DATABASE_URL: string
   APP_ORIGIN: string
   TRUST_PROXY: "true" | "false"
+  CLAMAV_HOST: string
+  CLAMAV_PORT: string
+  SUPABASE_STORAGE_TUS_ENDPOINT: string
 }
 
 type SupabaseStatus = {
@@ -49,6 +52,7 @@ export type StagedEnvironment = {
 export type ProvisionRuntime = {
   getStatusText: () => string
   generateSecret: () => string
+  generateEncryptionKey: () => string
   readEnvironment: (path: string) => ExistingEnvironment
   stageEnvironment: (
     path: string,
@@ -64,7 +68,16 @@ export type ProvisionRuntime = {
 }
 
 const APPLICATION_SECRET_KEYS = ["CSRF_SECRET", "SECURITY_HASH_PEPPER"] as const
+const ENCRYPTION_SECRET_KEYS = [
+  "BANK_ACCOUNT_ENCRYPTION_KEY_V1_BASE64",
+  "PII_ENCRYPTION_KEY_V1_BASE64",
+] as const
 const BASE64URL_32_BYTES = /^[A-Za-z0-9_-]{43}$/u
+const BASE64_32_BYTES = /^[A-Za-z0-9+/]{43}=$/u
+const ENV_ASSIGNMENT_PATTERN =
+  /^[\t \uFEFF]*(?:export[\t ]+)?([\w.-]+)(?:[\t ]*=[\t ]*|:[\t ]+)('(?:\\'|[^'])*'|"(?:\\"|[^"])*"|`(?:\\`|[^`])*`|[^#\r\n]*)[\t ]*(?:#[^\r\n]*)?\r?$/gmu
+const DOTENV_COMPATIBLE_ASSIGNMENT_PATTERN =
+  /(?:^|^)\s*(?:export\s+)?([\w.-]+)(?:\s*=\s*?|:\s+?)(\s*'(?:\\'|[^'])*'|\s*"(?:\\"|[^"])*"|\s*`(?:\\`|[^`])*`|[^#\r\n]+)?\s*(?:#.*)?(?:$|$)/gmu
 const LOCAL_DATABASE_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"])
 const PROVISIONING_FAILURE = "Local environment provisioning failed"
 const PUBLIC_PRIVILEGE_HARDENING_SQL = `
@@ -125,6 +138,77 @@ revoke all privileges on all functions in schema public
 revoke all privileges on all tables in schema public from axsys_bff;
 revoke all privileges on all sequences in schema public from axsys_bff;
 revoke all privileges on all functions in schema public from axsys_bff;
+
+do $$
+declare
+  v_recovery_function_oid oid := to_regprocedure(
+    'public.issue_password_recovery_grant(text)'
+  );
+  v_recovery_signature text;
+begin
+  if v_recovery_function_oid is not null then
+    if 1 <> (
+      select count(*)
+      from pg_proc function
+      join pg_namespace namespace on namespace.oid = function.pronamespace
+      join pg_roles owner_role on owner_role.oid = function.proowner
+      join pg_language language on language.oid = function.prolang
+      where function.oid = v_recovery_function_oid
+        and namespace.nspname = 'public'
+        and function.proname = 'issue_password_recovery_grant'
+        and owner_role.rolname = 'postgres'
+        and language.lanname = 'plpgsql'
+        and function.prokind = 'f'
+        and function.provolatile = 'v'
+        and function.prosecdef
+        and not function.proretset
+        and function.prorettype = 'timestamptz'::regtype
+        and function.proconfig = array['search_path=""']::text[]
+        and not exists (
+          select 1
+          from pg_depend dependency
+          where dependency.classid = 'pg_proc'::regclass
+            and dependency.objid = function.oid
+            and dependency.deptype = 'e'
+        )
+    ) then
+      raise exception 'password recovery RPC catalog assertion failed';
+    end if;
+
+    select format(
+      '%I.%I(%s)',
+      namespace.nspname,
+      function.proname,
+      pg_get_function_identity_arguments(function.oid)
+    )
+    into strict v_recovery_signature
+    from pg_proc function
+    join pg_namespace namespace on namespace.oid = function.pronamespace
+    where function.oid = v_recovery_function_oid;
+
+    execute format(
+      'revoke execute on function %s from public, anon, authenticated, service_role, axsys_bff',
+      v_recovery_signature
+    );
+    execute format(
+      'grant execute on function %s to authenticated',
+      v_recovery_signature
+    );
+
+    if not has_function_privilege(
+      'authenticated', v_recovery_function_oid, 'EXECUTE'
+    ) or exists (
+      select 1
+      from unnest(array['public','anon','service_role','axsys_bff']) role_name
+      where has_function_privilege(
+        role_name, v_recovery_function_oid, 'EXECUTE'
+      )
+    ) then
+      raise exception 'password recovery RPC privilege assertion failed';
+    end if;
+  end if;
+end
+$$;
 
 do $$
 begin
@@ -266,31 +350,118 @@ $$;
 
 function decodeEnvValue(rawValue: string): string {
   const value = rawValue.trim()
-  if (value.startsWith('"') && value.endsWith('"')) {
-    try {
-      return JSON.parse(value) as string
-    } catch {
-      return value.slice(1, -1)
-    }
-  }
-  if (value.startsWith("'") && value.endsWith("'")) {
-    return value.slice(1, -1)
+  const quote = value.at(0)
+  if (
+    (quote === '"' || quote === "'" || quote === "`") &&
+    value.at(-1) === quote
+  ) {
+    const unquoted = value.slice(1, -1)
+    return quote === '"'
+      ? unquoted.replaceAll("\\n", "\n").replaceAll("\\r", "\r")
+      : unquoted
   }
   return value
 }
 
+type EnvironmentAssignment = Readonly<{
+  end: number
+  key: string
+  rawValue: string
+  start: number
+}>
+
+function environmentAssignments(text: string): EnvironmentAssignment[] {
+  const pattern = new RegExp(
+    ENV_ASSIGNMENT_PATTERN.source,
+    ENV_ASSIGNMENT_PATTERN.flags,
+  )
+  return Array.from(text.matchAll(pattern), (match) => {
+    const start = match.index ?? 0
+    let end = start + match[0].length
+    if (text.at(end) === "\n") end += 1
+    return {
+      end,
+      key: match[1],
+      rawValue: match[2] ?? "",
+      start,
+    }
+  })
+}
+
+function dotenvCompatibleAssignments(text: string): EnvironmentAssignment[] {
+  const normalized = text.replace(/\r\n?/gu, "\n")
+  const pattern = new RegExp(
+    DOTENV_COMPATIBLE_ASSIGNMENT_PATTERN.source,
+    DOTENV_COMPATIBLE_ASSIGNMENT_PATTERN.flags,
+  )
+  return Array.from(normalized.matchAll(pattern), (match) => ({
+    end: (match.index ?? 0) + match[0].length,
+    key: match[1],
+    rawValue: match[2] ?? "",
+    start: match.index ?? 0,
+  }))
+}
+
+function assertOwnedAssignmentsAreUnambiguous(
+  text: string,
+  ownedKeys: ReadonlySet<string>,
+): void {
+  const safeAssignments = environmentAssignments(text)
+    .filter(({ key }) => ownedKeys.has(key))
+    .map(({ key, rawValue }) => [key, decodeEnvValue(rawValue)] as const)
+  const dotenvAssignments = dotenvCompatibleAssignments(text)
+    .filter(({ key }) => ownedKeys.has(key))
+    .map(({ key, rawValue }) => [key, decodeEnvValue(rawValue)] as const)
+
+  if (
+    safeAssignments.length !== dotenvAssignments.length ||
+    safeAssignments.some(
+      ([key, value], index) =>
+        dotenvAssignments[index]?.[0] !== key ||
+        dotenvAssignments[index]?.[1] !== value,
+    )
+  ) {
+    throw new Error("Owned environment key uses unsupported syntax")
+  }
+}
+
 export function parseEnv(text: string): Record<string, string> {
   const values = new Map<string, string>()
-  for (const line of text.split(/\r?\n/u)) {
-    const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/u)
-    if (match) {
-      values.set(match[1], decodeEnvValue(match[2]))
-    }
+  for (const assignment of environmentAssignments(text)) {
+    values.set(assignment.key, decodeEnvValue(assignment.rawValue))
   }
   return Object.fromEntries(values)
 }
 
+function preserveUnknownEnvironment(
+  text: string,
+  ownedKeys: ReadonlySet<string>,
+): string {
+  let cursor = 0
+  let preserved = ""
+  for (const assignment of environmentAssignments(text)) {
+    if (!ownedKeys.has(assignment.key)) continue
+    preserved += text.slice(cursor, assignment.start)
+    cursor = assignment.end
+  }
+  preserved += text.slice(cursor)
+  return preserved
+}
+
+function isCanonicalEncryptionKey(value: string): boolean {
+  if (!BASE64_32_BYTES.test(value)) return false
+  const decoded = Buffer.from(value, "base64")
+  return decoded.byteLength === 32 && decoded.toString("base64") === value
+}
+
 export function parseSupabaseStatus(text: string): SupabaseStatus {
+  if (
+    /^[\t ]*(?:export[\t ]+)?(?:API_URL|PUBLISHABLE_KEY|ANON_KEY|SECRET_KEY|SERVICE_ROLE_KEY|DB_URL)[\t ]*=.*#/mu.test(
+      text,
+    )
+  ) {
+    throw new Error("Supabase status did not return required local credentials")
+  }
   const status = parseEnv(text)
   const apiUrl = status.API_URL
   const publishableKey = status.PUBLISHABLE_KEY ?? status.ANON_KEY
@@ -336,25 +507,53 @@ export function buildLocalEnvironment(input: {
   existingText: string
   canonical: CanonicalEnvironment
   generateSecret: () => string
+  generateEncryptionKey: () => string
 }): string {
-  const existing = parseEnv(input.existingText)
   const ownedKeys = new Set<string>([
     ...Object.keys(input.canonical),
     ...APPLICATION_SECRET_KEYS,
+    ...ENCRYPTION_SECRET_KEYS,
   ])
+  assertOwnedAssignmentsAreUnambiguous(input.existingText, ownedKeys)
+  const existing = parseEnv(input.existingText)
   const merged: Record<string, string> = { ...input.canonical }
 
   for (const key of APPLICATION_SECRET_KEYS) {
-    merged[key] = existing[key] || input.generateSecret()
-  }
-
-  for (const [key, value] of Object.entries(existing)) {
-    if (!ownedKeys.has(key)) {
-      merged[key] = value
+    const value = Object.hasOwn(existing, key)
+      ? existing[key]
+      : input.generateSecret()
+    if (!BASE64URL_32_BYTES.test(value)) {
+      throw new Error("Application secret has an invalid format")
     }
+    merged[key] = value
   }
 
-  return serializeEnvironment(merged)
+  for (const key of ENCRYPTION_SECRET_KEYS) {
+    if (Object.hasOwn(existing, key)) {
+      if (!isCanonicalEncryptionKey(existing[key])) {
+        throw new Error("Existing encryption key has an invalid format")
+      }
+      merged[key] = existing[key]
+      continue
+    }
+
+    const generated = input.generateEncryptionKey()
+    if (!isCanonicalEncryptionKey(generated)) {
+      throw new Error("Generated encryption key has an invalid format")
+    }
+    merged[key] = generated
+  }
+
+  const ownedEnvironment = serializeEnvironment(merged)
+  const preservedEnvironment = preserveUnknownEnvironment(
+    input.existingText,
+    ownedKeys,
+  )
+  const preservedPrefix =
+    preservedEnvironment.length === 0 || preservedEnvironment.endsWith("\n")
+      ? preservedEnvironment
+      : `${preservedEnvironment}\n`
+  return `${preservedPrefix}${ownedEnvironment}`
 }
 
 function isMissingFile(error: unknown): boolean {
@@ -632,6 +831,9 @@ const realRuntime: ProvisionRuntime = {
   generateSecret() {
     return randomBytes(32).toString("base64url")
   },
+  generateEncryptionKey() {
+    return randomBytes(32).toString("base64")
+  },
   readEnvironment: readPrivateEnvFile,
   stageEnvironment: stagePrivateEnvFile,
   hardenPublicPrivileges: hardenLocalPublicPrivileges,
@@ -660,8 +862,13 @@ async function provisionWithRuntime(runtime: ProvisionRuntime): Promise<void> {
       BFF_DATABASE_URL: bffUrl.toString(),
       APP_ORIGIN: "http://127.0.0.1:3000",
       TRUST_PROXY: "false",
+      CLAMAV_HOST: "127.0.0.1",
+      CLAMAV_PORT: "3310",
+      SUPABASE_STORAGE_TUS_ENDPOINT:
+        "http://127.0.0.1:54321/storage/v1/upload/resumable",
     },
     generateSecret: runtime.generateSecret,
+    generateEncryptionKey: runtime.generateEncryptionKey,
   })
   const staged = runtime.stageEnvironment(".env.local", output, existing)
   const rollbackPassword = rollbackPasswordFromEnvironment(existing.contents)
@@ -695,6 +902,31 @@ export function formatProvisioningFailure(error: unknown): string {
   return `${PROVISIONING_FAILURE}.\n`
 }
 
+type ProvisioningCliOptions = Readonly<{
+  provision?: () => Promise<void>
+  writeStderr?: (value: string) => void
+  writeStdout?: (value: string) => void
+}>
+
+export async function runProvisioningCli({
+  provision = () => provisionLocalEnvironment(),
+  writeStderr = (value) => {
+    process.stderr.write(value)
+  },
+  writeStdout = (value) => {
+    process.stdout.write(value)
+  },
+}: ProvisioningCliOptions = {}): Promise<0 | 1> {
+  try {
+    await provision()
+    writeStdout("Local environment provisioned without printing secrets.\n")
+    return 0
+  } catch (error) {
+    writeStderr(formatProvisioningFailure(error))
+    return 1
+  }
+}
+
 export async function provisionLocalEnvironment(
   runtime: ProvisionRuntime = realRuntime,
 ): Promise<void> {
@@ -707,12 +939,7 @@ export async function provisionLocalEnvironment(
 
 const entryPoint = process.argv[1]
 if (entryPoint && import.meta.url === pathToFileURL(resolve(entryPoint)).href) {
-  provisionLocalEnvironment()
-    .then(() => {
-      process.stdout.write("Local environment provisioned without printing secrets.\n")
-    })
-    .catch((error: unknown) => {
-      process.stderr.write(formatProvisioningFailure(error))
-      process.exitCode = 1
-    })
+  void runProvisioningCli().then((exitCode) => {
+    process.exitCode = exitCode
+  })
 }

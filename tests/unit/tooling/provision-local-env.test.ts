@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process"
 import {
   chmodSync,
   mkdirSync,
@@ -18,6 +19,7 @@ import {
   parseSupabaseStatus,
   provisionLocalEnvironment,
   readPrivateEnvFile,
+  runProvisioningCli,
   stagePrivateEnvFile,
   validateLocalDatabaseUrl,
   writePrivateEnvFile,
@@ -26,6 +28,21 @@ import {
 
 const temporaryDirectories: string[] = []
 
+function parseWithNextEnvironment(contents: string, keys: readonly string[]) {
+  const source = [
+    "const { processEnv } = require('@next/env')",
+    "for (const key of JSON.parse(process.argv[1])) delete process.env[key]",
+    "const [, parsed] = processEnv([{ path: '.env.local', contents: require('node:fs').readFileSync(0, 'utf8'), env: {} }], process.cwd(), console, true)",
+    "process.stdout.write(JSON.stringify(parsed))",
+  ].join(";")
+  return JSON.parse(
+    execFileSync(process.execPath, ["-e", source, JSON.stringify(keys)], {
+      encoding: "utf8",
+      input: contents,
+    }),
+  ) as Record<string, string>
+}
+
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true })
@@ -33,6 +50,8 @@ afterEach(() => {
 })
 
 describe("local environment provisioner", () => {
+  const bankEncryptionKey = Buffer.alloc(32, 1).toString("base64")
+  const piiEncryptionKey = Buffer.alloc(32, 2).toString("base64")
   const validStatus = [
     "API_URL=http://127.0.0.1:54321",
     `PUBLISHABLE_KEY=sb_publishable_${"p".repeat(20)}`,
@@ -44,6 +63,7 @@ describe("local environment provisioner", () => {
     return {
       getStatusText: () => validStatus,
       generateSecret: () => "n".repeat(43),
+      generateEncryptionKey: () => bankEncryptionKey,
       readEnvironment: () => ({ exists: false, contents: "" }),
       stageEnvironment: () => ({
         commit: () => {},
@@ -99,11 +119,16 @@ describe("local environment provisioner", () => {
   it("overwrites canonical runtime values while preserving secrets and every unknown key", () => {
     const existingText = [
       "NEXT_PUBLIC_SUPABASE_URL=http://old.invalid",
-      `CSRF_SECRET=${"c".repeat(32)}`,
-      `SECURITY_HASH_PEPPER=${"p".repeat(32)}`,
+      `CSRF_SECRET=${"c".repeat(43)}`,
+      `SECURITY_HASH_PEPPER=${"p".repeat(43)}`,
+      `BANK_ACCOUNT_ENCRYPTION_KEY_V1_BASE64=${bankEncryptionKey}`,
+      `PII_ENCRYPTION_KEY_V1_BASE64=${piiEncryptionKey}`,
       "AXSYS_BOOTSTRAP_SUPER_ADMIN_EMAIL=owner@example.test",
       "AXSYS_E2E_COMPANY_A_EMAIL=company-a@example.test",
       "SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET=provider-placeholder",
+      "GEMINI_API_KEY=future-provider-secret # keep this local comment",
+      "FUTURE_SINGLE='literal\\nvalue'",
+      'FUTURE_MULTILINE="line one\nline two"',
       "FUTURE_FLAG=kept",
     ].join("\n")
 
@@ -117,24 +142,42 @@ describe("local environment provisioner", () => {
         BFF_DATABASE_URL: "postgresql://axsys_bff:local@127.0.0.1:54322/postgres",
         APP_ORIGIN: "http://127.0.0.1:3000",
         TRUST_PROXY: "false",
+        CLAMAV_HOST: "127.0.0.1",
+        CLAMAV_PORT: "3310",
+        SUPABASE_STORAGE_TUS_ENDPOINT:
+          "http://127.0.0.1:54321/storage/v1/upload/resumable",
       },
       generateSecret: () => {
         throw new Error("existing secrets must be reused")
+      },
+      generateEncryptionKey: () => {
+        throw new Error("existing encryption keys must be reused")
       },
     })
     const parsed = parseEnv(output)
 
     expect(parsed.NEXT_PUBLIC_SUPABASE_URL).toBe("http://127.0.0.1:54321")
-    expect(parsed.CSRF_SECRET).toBe("c".repeat(32))
-    expect(parsed.SECURITY_HASH_PEPPER).toBe("p".repeat(32))
+    expect(parsed.CSRF_SECRET).toBe("c".repeat(43))
+    expect(parsed.SECURITY_HASH_PEPPER).toBe("p".repeat(43))
+    expect(parsed.BANK_ACCOUNT_ENCRYPTION_KEY_V1_BASE64).toBe(bankEncryptionKey)
+    expect(parsed.PII_ENCRYPTION_KEY_V1_BASE64).toBe(piiEncryptionKey)
     expect(parsed.AXSYS_BOOTSTRAP_SUPER_ADMIN_EMAIL).toBe("owner@example.test")
     expect(parsed.AXSYS_E2E_COMPANY_A_EMAIL).toBe("company-a@example.test")
     expect(parsed.SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET).toBe("provider-placeholder")
+    expect(parsed.GEMINI_API_KEY).toBe("future-provider-secret")
+    expect(parsed.FUTURE_SINGLE).toBe("literal\\nvalue")
+    expect(parsed.FUTURE_MULTILINE).toBe("line one\nline two")
     expect(parsed.FUTURE_FLAG).toBe("kept")
+    expect(output).toContain(
+      "GEMINI_API_KEY=future-provider-secret # keep this local comment",
+    )
+    expect(output).toContain("FUTURE_SINGLE='literal\\nvalue'")
+    expect(output).toContain('FUTURE_MULTILINE="line one\nline two"')
   })
 
   it("creates missing application secrets independently", () => {
-    const generated = ["generated-csrf", "generated-pepper"]
+    const generated = ["g".repeat(43), "h".repeat(43)]
+    const generatedEncryptionKeys = [bankEncryptionKey, piiEncryptionKey]
     const output = buildLocalEnvironment({
       existingText: "FUTURE_FLAG=kept",
       canonical: {
@@ -145,13 +188,274 @@ describe("local environment provisioner", () => {
         BFF_DATABASE_URL: "postgresql://axsys_bff:local@127.0.0.1:54322/postgres",
         APP_ORIGIN: "http://127.0.0.1:3000",
         TRUST_PROXY: "false",
+        CLAMAV_HOST: "127.0.0.1",
+        CLAMAV_PORT: "3310",
+        SUPABASE_STORAGE_TUS_ENDPOINT:
+          "http://127.0.0.1:54321/storage/v1/upload/resumable",
       },
       generateSecret: () => generated.shift()!,
+      generateEncryptionKey: () => generatedEncryptionKeys.shift()!,
     })
     const parsed = parseEnv(output)
 
-    expect(parsed.CSRF_SECRET).toBe("generated-csrf")
-    expect(parsed.SECURITY_HASH_PEPPER).toBe("generated-pepper")
+    expect(parsed.CSRF_SECRET).toBe("g".repeat(43))
+    expect(parsed.SECURITY_HASH_PEPPER).toBe("h".repeat(43))
+    expect(parsed.BANK_ACCOUNT_ENCRYPTION_KEY_V1_BASE64).toBe(bankEncryptionKey)
+    expect(parsed.PII_ENCRYPTION_KEY_V1_BASE64).toBe(piiEncryptionKey)
+  })
+
+  it.each([
+    ["blank", "CSRF_SECRET="],
+    ["quoted blank", 'CSRF_SECRET=""'],
+    [
+      "escaped dollar expansion",
+      `CSRF_SECRET=${"a".repeat(43)}\\$FUTURE_SECRET`,
+    ],
+    [
+      "valid value followed by a blank duplicate",
+      `CSRF_SECRET=${"c".repeat(43)}\nCSRF_SECRET=`,
+    ],
+  ])(
+    "rejects a present %s application secret without rotating it",
+    async (_label, csrfAssignment) => {
+      const generateSecret = vi.fn()
+      const generateEncryptionKey = vi.fn()
+      const stageEnvironment = vi.fn()
+      const hardenPublicPrivileges = vi.fn()
+      const runtime = createRuntime({
+        generateSecret,
+        generateEncryptionKey,
+        readEnvironment: () => ({
+          exists: true,
+          contents: [
+            csrfAssignment,
+            `SECURITY_HASH_PEPPER=${"p".repeat(43)}`,
+            `BANK_ACCOUNT_ENCRYPTION_KEY_V1_BASE64=${bankEncryptionKey}`,
+            `PII_ENCRYPTION_KEY_V1_BASE64=${piiEncryptionKey}`,
+          ].join("\n"),
+        }),
+        stageEnvironment,
+        hardenPublicPrivileges,
+      })
+
+      await expect(provisionLocalEnvironment(runtime)).rejects.toEqual(
+        new Error("Local environment provisioning failed"),
+      )
+      expect(generateSecret).toHaveBeenCalledTimes(1)
+      expect(generateEncryptionKey).not.toHaveBeenCalled()
+      expect(stageEnvironment).not.toHaveBeenCalled()
+      expect(hardenPublicPrivileges).not.toHaveBeenCalled()
+    },
+  )
+
+  it("rejects malformed generated application material before encryption or DB work", async () => {
+    const generateSecret = vi
+      .fn()
+      .mockReturnValueOnce("b".repeat(43))
+      .mockReturnValueOnce("not-canonical")
+    const generateEncryptionKey = vi.fn()
+    const stageEnvironment = vi.fn()
+    const hardenPublicPrivileges = vi.fn()
+    const runtime = createRuntime({
+      generateSecret,
+      generateEncryptionKey,
+      stageEnvironment,
+      hardenPublicPrivileges,
+    })
+
+    await expect(provisionLocalEnvironment(runtime)).rejects.toEqual(
+      new Error("Local environment provisioning failed"),
+    )
+    expect(generateSecret).toHaveBeenCalledTimes(2)
+    expect(generateEncryptionKey).not.toHaveBeenCalled()
+    expect(stageEnvironment).not.toHaveBeenCalled()
+    expect(hardenPublicPrivileges).not.toHaveBeenCalled()
+  })
+
+  it("writes fixed local file endpoints and generates both encryption keys once", async () => {
+    const generatedKeys = [bankEncryptionKey, piiEncryptionKey]
+    const generateEncryptionKey = vi.fn(() => generatedKeys.shift()!)
+    let stagedContents = ""
+    const runtime = createRuntime({
+      generateEncryptionKey,
+      stageEnvironment: (_path, contents) => {
+        stagedContents = contents
+        return { commit: () => {}, discard: () => {} }
+      },
+    })
+
+    await provisionLocalEnvironment(runtime)
+
+    const parsed = parseEnv(stagedContents)
+    expect(parsed.CLAMAV_HOST).toBe("127.0.0.1")
+    expect(parsed.CLAMAV_PORT).toBe("3310")
+    expect(parsed.SUPABASE_STORAGE_TUS_ENDPOINT).toBe(
+      "http://127.0.0.1:54321/storage/v1/upload/resumable",
+    )
+    expect(parsed.BANK_ACCOUNT_ENCRYPTION_KEY_V1_BASE64).toBe(bankEncryptionKey)
+    expect(parsed.PII_ENCRYPTION_KEY_V1_BASE64).toBe(piiEncryptionKey)
+    expect(generateEncryptionKey).toHaveBeenCalledTimes(2)
+  })
+
+  it("fails safely before staging when generated encryption material is malformed", async () => {
+    const stageEnvironment = vi.fn()
+    const hardenPublicPrivileges = vi.fn()
+    const runtime = createRuntime({
+      generateEncryptionKey: () => "not-a-32-byte-base64-key",
+      stageEnvironment,
+      hardenPublicPrivileges,
+    })
+
+    await expect(provisionLocalEnvironment(runtime)).rejects.toEqual(
+      new Error("Local environment provisioning failed"),
+    )
+    expect(stageEnvironment).not.toHaveBeenCalled()
+    expect(hardenPublicPrivileges).not.toHaveBeenCalled()
+  })
+
+  it("rejects a malformed existing encryption key without replacing it or touching DB", async () => {
+    const stageEnvironment = vi.fn()
+    const hardenPublicPrivileges = vi.fn()
+    const generateEncryptionKey = vi.fn()
+    const runtime = createRuntime({
+      generateEncryptionKey,
+      readEnvironment: () => ({
+        exists: true,
+        contents: [
+          "BANK_ACCOUNT_ENCRYPTION_KEY_V1_BASE64=malformed-existing-key",
+          `PII_ENCRYPTION_KEY_V1_BASE64=${piiEncryptionKey}`,
+        ].join("\n"),
+      }),
+      stageEnvironment,
+      hardenPublicPrivileges,
+    })
+
+    await expect(provisionLocalEnvironment(runtime)).rejects.toEqual(
+      new Error("Local environment provisioning failed"),
+    )
+    expect(generateEncryptionKey).not.toHaveBeenCalled()
+    expect(stageEnvironment).not.toHaveBeenCalled()
+    expect(hardenPublicPrivileges).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["empty equals", "BANK_ACCOUNT_ENCRYPTION_KEY_V1_BASE64="],
+    ["empty colon", "BANK_ACCOUNT_ENCRYPTION_KEY_V1_BASE64: "],
+    ["quoted empty", 'BANK_ACCOUNT_ENCRYPTION_KEY_V1_BASE64=""'],
+    [
+      "valid value followed by an empty duplicate",
+      `BANK_ACCOUNT_ENCRYPTION_KEY_V1_BASE64=${bankEncryptionKey}\nBANK_ACCOUNT_ENCRYPTION_KEY_V1_BASE64=`,
+    ],
+  ])(
+    "fails closed for a present %s encryption key instead of rotating it",
+    async (_label, bankAssignment) => {
+      const stageEnvironment = vi.fn()
+      const hardenPublicPrivileges = vi.fn()
+      const generateEncryptionKey = vi.fn()
+      const runtime = createRuntime({
+        generateEncryptionKey,
+        readEnvironment: () => ({
+          exists: true,
+          contents: [
+            bankAssignment,
+            `PII_ENCRYPTION_KEY_V1_BASE64=${piiEncryptionKey}`,
+          ].join("\n"),
+        }),
+        stageEnvironment,
+        hardenPublicPrivileges,
+      })
+
+      await expect(provisionLocalEnvironment(runtime)).rejects.toEqual(
+        new Error("Local environment provisioning failed"),
+      )
+      expect(generateEncryptionKey).not.toHaveBeenCalled()
+      expect(stageEnvironment).not.toHaveBeenCalled()
+      expect(hardenPublicPrivileges).not.toHaveBeenCalled()
+    },
+  )
+
+  it("keeps both generated encryption keys byte-identical across a real rerun", async () => {
+    let environment = "GEMINI_API_KEY=future-secret # preserve\n"
+    const generatedKeys = [bankEncryptionKey, piiEncryptionKey]
+    const generateEncryptionKey = vi.fn(() => generatedKeys.shift()!)
+    const runtime = createRuntime({
+      generateEncryptionKey,
+      readEnvironment: () => ({
+        exists: environment.length > 0,
+        contents: environment,
+      }),
+      stageEnvironment: (_path, contents) => ({
+        commit: () => {
+          environment = contents
+        },
+        discard: () => {},
+      }),
+    })
+
+    await provisionLocalEnvironment(runtime)
+    const first = parseEnv(environment)
+    const firstOutput = environment
+    await provisionLocalEnvironment(runtime)
+    const second = parseEnv(environment)
+
+    expect(generateEncryptionKey).toHaveBeenCalledTimes(2)
+    expect(second.BANK_ACCOUNT_ENCRYPTION_KEY_V1_BASE64).toBe(
+      first.BANK_ACCOUNT_ENCRYPTION_KEY_V1_BASE64,
+    )
+    expect(second.PII_ENCRYPTION_KEY_V1_BASE64).toBe(
+      first.PII_ENCRYPTION_KEY_V1_BASE64,
+    )
+    expect(second.GEMINI_API_KEY).toBe("future-secret")
+    expect(environment).toContain("GEMINI_API_KEY=future-secret # preserve")
+    expect(environment).toBe(firstOutput)
+    expect(environment.split("\n")).toHaveLength(firstOutput.split("\n").length)
+  })
+
+  it("removes BOM and colon-style owned values with parity against Next's loader", () => {
+    const existing = [
+      "\uFEFFCLAMAV_HOST: scanner.invalid",
+      "APP_ORIGIN: https://stale.example.test",
+      `BANK_ACCOUNT_ENCRYPTION_KEY_V1_BASE64: ${bankEncryptionKey}`,
+      `PII_ENCRYPTION_KEY_V1_BASE64: ${piiEncryptionKey}`,
+      "FUTURE_COLON: preserved-value",
+    ].join("\n")
+    const output = buildLocalEnvironment({
+      existingText: existing,
+      canonical: {
+        NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321",
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: `sb_publishable_${"n".repeat(20)}`,
+        SUPABASE_SECRET_KEY: `sb_secret_${"n".repeat(24)}`,
+        DATABASE_URL: "postgresql://postgres:local@127.0.0.1:54322/postgres",
+        BFF_DATABASE_URL: "postgresql://axsys_bff:local@127.0.0.1:54322/postgres",
+        APP_ORIGIN: "http://127.0.0.1:3000",
+        TRUST_PROXY: "false",
+        CLAMAV_HOST: "127.0.0.1",
+        CLAMAV_PORT: "3310",
+        SUPABASE_STORAGE_TUS_ENDPOINT:
+          "http://127.0.0.1:54321/storage/v1/upload/resumable",
+      },
+      generateSecret: () => "n".repeat(43),
+      generateEncryptionKey: () => {
+        throw new Error("colon-style existing keys must be reused")
+      },
+    })
+    const nextParsed = parseWithNextEnvironment(output, [
+      "CLAMAV_HOST",
+      "APP_ORIGIN",
+      "BANK_ACCOUNT_ENCRYPTION_KEY_V1_BASE64",
+      "PII_ENCRYPTION_KEY_V1_BASE64",
+      "FUTURE_COLON",
+    ])
+
+    expect(nextParsed.CLAMAV_HOST).toBe("127.0.0.1")
+    expect(nextParsed.APP_ORIGIN).toBe("http://127.0.0.1:3000")
+    expect(nextParsed.BANK_ACCOUNT_ENCRYPTION_KEY_V1_BASE64).toBe(
+      bankEncryptionKey,
+    )
+    expect(nextParsed.PII_ENCRYPTION_KEY_V1_BASE64).toBe(piiEncryptionKey)
+    expect(nextParsed.FUTURE_COLON).toBe("preserved-value")
+    expect(output).not.toContain("scanner.invalid")
+    expect(output).not.toContain("stale.example.test")
   })
 
   it("forces mode 0600 even when the destination already exists", () => {
@@ -418,6 +722,46 @@ describe("local environment provisioner", () => {
 
     expect(message).toBe("Local environment provisioning failed.\n")
     expect(message).not.toContain("credential")
+  })
+
+  it("writes only fixed redacted CLI messages on success and sensitive failure", async () => {
+    const sensitive =
+      "postgresql://user:credential@127.0.0.1:54322/postgres?token=raw"
+    let stdout = ""
+    let stderr = ""
+    const failureCode = await runProvisioningCli({
+      provision: async () => {
+        throw new Error(sensitive)
+      },
+      writeStderr: (value) => {
+        stderr += value
+      },
+      writeStdout: (value) => {
+        stdout += value
+      },
+    })
+
+    expect(failureCode).toBe(1)
+    expect(stdout).toBe("")
+    expect(stderr).toBe("Local environment provisioning failed.\n")
+    expect(stderr).not.toContain("credential")
+    expect(stderr).not.toContain("token")
+
+    stdout = ""
+    stderr = ""
+    const successCode = await runProvisioningCli({
+      provision: async () => {},
+      writeStderr: (value) => {
+        stderr += value
+      },
+      writeStdout: (value) => {
+        stdout += value
+      },
+    })
+
+    expect(successCode).toBe(0)
+    expect(stdout).toBe("Local environment provisioned without printing secrets.\n")
+    expect(stderr).toBe("")
   })
 })
 

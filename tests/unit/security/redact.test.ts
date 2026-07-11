@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { TEST_FILE_SERVICE_ENV } from "../../helpers/file-service-env"
 
 const VALID_SERVER_ENV = {
   SUPABASE_SECRET_KEY: `sb_secret_${"s".repeat(24)}`,
@@ -9,6 +10,7 @@ const VALID_SERVER_ENV = {
   CSRF_SECRET: "c".repeat(32),
   SECURITY_HASH_PEPPER: "p".repeat(32),
   TRUST_PROXY: "false",
+  ...TEST_FILE_SERVICE_ENV,
 } as const
 
 function stubServerEnv(): void {
