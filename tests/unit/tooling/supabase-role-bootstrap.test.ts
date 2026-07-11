@@ -137,10 +137,10 @@ describe("Supabase custom role bootstrap", () => {
     expect(repeatableHardeningSql).toContain(
       "revoke all privileges on all functions in schema public from axsys_bff;",
     )
-    expect(repeatableHardeningSql).not.toContain(
+    expect(repeatableHardeningSql).toContain(
       "revoke all privileges on all tables in schema public from axsys_bff;",
     )
-    expect(repeatableHardeningSql).not.toContain(
+    expect(repeatableHardeningSql).toContain(
       "revoke all privileges on all sequences in schema public from axsys_bff;",
     )
     const privateFunctionRevoke = provisionerSource.match(

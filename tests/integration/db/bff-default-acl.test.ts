@@ -75,6 +75,17 @@ describe("axsys_bff default ACL hardening", () => {
 
       for (const [owner, ownerSql] of ownerConnections) {
         await ownerSql.unsafe(`
+          create table public.axsys_bff_acl_${owner}_existing_table(id bigint);
+          create sequence public.axsys_bff_acl_${owner}_existing_sequence;
+          grant all privileges
+            on table public.axsys_bff_acl_${owner}_existing_table
+            to axsys_bff;
+          grant all privileges
+            on sequence public.axsys_bff_acl_${owner}_existing_sequence
+            to axsys_bff;
+        `)
+
+        await ownerSql.unsafe(`
           alter default privileges for role ${owner}
             grant all privileges on tables to axsys_bff;
           alter default privileges for role ${owner} in schema public
@@ -113,6 +124,29 @@ describe("axsys_bff default ACL hardening", () => {
           and owner_role.rolname in ('postgres', 'supabase_admin')
           and grantee_role.rolname = 'axsys_bff'
           and defaults.defaclobjtype in ('r', 'S', 'f')
+      `
+
+      const existingPrivileges = await supabaseAdminOwnerSql<
+        {
+          owner: string
+          tablePrivilege: boolean
+          sequencePrivilege: boolean
+        }[]
+      >`
+        select
+          owner,
+          has_table_privilege(
+            'axsys_bff',
+            format('public.axsys_bff_acl_%s_existing_table', owner),
+            'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+          ) as "tablePrivilege",
+          has_sequence_privilege(
+            'axsys_bff',
+            format('public.axsys_bff_acl_%s_existing_sequence', owner),
+            'USAGE,SELECT,UPDATE'
+          ) as "sequencePrivilege"
+        from unnest(array['postgres', 'supabase_admin']) owner
+        order by owner
       `
 
       const futurePrivileges = await supabaseAdminOwnerSql<
@@ -162,10 +196,23 @@ describe("axsys_bff default ACL hardening", () => {
 
       expect({
         remainingDefaultGrants: remainingDefaults.count,
+        existingPrivileges,
         futurePrivileges,
         explicitPrivileges,
       }).toEqual({
         remainingDefaultGrants: 0,
+        existingPrivileges: [
+          {
+            owner: "postgres",
+            tablePrivilege: false,
+            sequencePrivilege: false,
+          },
+          {
+            owner: "supabase_admin",
+            tablePrivilege: false,
+            sequencePrivilege: false,
+          },
+        ],
         futurePrivileges: [
           {
             owner: "postgres",
@@ -191,6 +238,8 @@ describe("axsys_bff default ACL hardening", () => {
           drop function if exists public.axsys_bff_acl_${owner}_function();
           drop sequence if exists public.axsys_bff_acl_${owner}_sequence;
           drop table if exists public.axsys_bff_acl_${owner}_table;
+          drop sequence if exists public.axsys_bff_acl_${owner}_existing_sequence;
+          drop table if exists public.axsys_bff_acl_${owner}_existing_table;
 
           alter default privileges for role ${owner}
             revoke all privileges on tables from axsys_bff;

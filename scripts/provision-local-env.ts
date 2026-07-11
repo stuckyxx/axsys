@@ -71,6 +71,8 @@ const PUBLIC_PRIVILEGE_HARDENING_SQL = `
 revoke all privileges on all tables in schema public from public;
 revoke all privileges on all sequences in schema public from public;
 revoke all privileges on all functions in schema public from public;
+revoke all privileges on all tables in schema public from axsys_bff;
+revoke all privileges on all sequences in schema public from axsys_bff;
 revoke all privileges on all functions in schema public from axsys_bff;
 
 do $$
