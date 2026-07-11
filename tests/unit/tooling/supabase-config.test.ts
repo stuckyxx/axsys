@@ -3,6 +3,16 @@ import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
 describe("Supabase local configuration", () => {
+  it("enables email sign-in for admin-created users while public signup stays disabled", () => {
+    const source = readFileSync(resolve("supabase/config.toml"), "utf8")
+    const auth = source.match(/\[auth\][\s\S]*?(?=\n\[|$)/u)?.[0]
+    const email = source.match(/\[auth\.email\][\s\S]*?(?=\n\[|$)/u)?.[0]
+
+    expect(auth).toMatch(/\nenable_signup = false\n/u)
+    expect(email).toMatch(/\nenable_signup = true\n/u)
+    expect(email).toMatch(/\nenable_confirmations = true\n/u)
+  })
+
   it("keeps out-of-scope analytics disabled for Colima socket compatibility", () => {
     const source = readFileSync(resolve("supabase/config.toml"), "utf8")
     const analytics = source.match(/\[analytics\][\s\S]*?(?=\n\[|$)/u)?.[0]

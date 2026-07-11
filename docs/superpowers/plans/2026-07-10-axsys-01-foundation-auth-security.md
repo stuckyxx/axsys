@@ -960,7 +960,9 @@ token_refresh = 150
 token_verifications = 30
 
 [auth.email]
-enable_signup = false
+# The provider must stay enabled so administrator-created users can sign in.
+# Global [auth].enable_signup=false still blocks public registration.
+enable_signup = true
 double_confirm_changes = true
 enable_confirmations = true
 secure_password_change = true
