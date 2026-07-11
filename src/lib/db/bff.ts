@@ -263,4 +263,80 @@ export const bffDb = {
       )
     `
   },
+
+  async beginTemporaryPasswordReset(input: {
+    actorUserId: string
+    sessionId: string
+    targetUserId: string
+    correlationId: string
+  }): Promise<{ operationId: string; expiresAt: string }> {
+    const sql = await getSql()
+    const [row] = await sql<[{ operationId: string; expiresAt: Date }]>`
+      select operation_id as "operationId", expires_at as "expiresAt"
+      from private.begin_temporary_password_reset(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.targetUserId}::uuid,
+        ${input.correlationId}::uuid
+      )
+    `
+    return {
+      operationId: row.operationId,
+      expiresAt: row.expiresAt.toISOString(),
+    }
+  },
+
+  async completeTemporaryPasswordReset(input: {
+    actorUserId: string
+    sessionId: string
+    operationId: string
+    correlationId: string
+  }): Promise<void> {
+    const sql = await getSql()
+    await sql`
+      select private.complete_temporary_password_reset(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.operationId}::uuid,
+        ${input.correlationId}::uuid
+      )
+    `
+  },
+
+  async failTemporaryPasswordReset(input: {
+    actorUserId: string
+    sessionId: string
+    operationId: string
+    reasonCode:
+      | "AUTH_PROVIDER_FAILURE"
+      | "AUTH_COMPLETION_FAILURE"
+      | "AUTH_CALL_NOT_ATTEMPTED"
+    correlationId: string
+  }): Promise<void> {
+    const sql = await getSql()
+    await sql`
+      select private.fail_temporary_password_reset(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.operationId}::uuid,
+        ${input.reasonCode},
+        ${input.correlationId}::uuid
+      )
+    `
+  },
+
+  async completeTemporaryPasswordChange(input: {
+    actorUserId: string
+    sessionId: string
+    correlationId: string
+  }): Promise<void> {
+    const sql = await getSql()
+    await sql`
+      select private.complete_temporary_password_change(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.correlationId}::uuid
+      )
+    `
+  },
 }

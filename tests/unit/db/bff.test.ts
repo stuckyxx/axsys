@@ -12,12 +12,16 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe("bffDb boundary", () => {
-  it("exports only the nine typed security-control operations", () => {
+  it("exports only the thirteen typed security-control and password operations", () => {
     expect(Object.keys(bffDb).sort()).toEqual([
       "assertAuthSession",
+      "beginTemporaryPasswordReset",
       "clearRateLimit",
+      "completeTemporaryPasswordChange",
+      "completeTemporaryPasswordReset",
       "consumeRateLimit",
       "failClosedLoginSession",
+      "failTemporaryPasswordReset",
       "registerAuthSession",
       "revokeSessionsAndWriteLogout",
       "rotateAppSessionAfterReauthentication",
@@ -137,6 +141,69 @@ describe("bffDb boundary", () => {
     expectTypeOf(
       bffDb.rotateAppSessionAfterReauthentication,
     ).returns.toEqualTypeOf<Promise<void>>()
+    expectTypeOf<
+      Parameters<typeof bffDb.beginTemporaryPasswordReset>
+    >().toEqualTypeOf<
+      [
+        input: {
+          actorUserId: string
+          sessionId: string
+          targetUserId: string
+          correlationId: string
+        },
+      ]
+    >()
+    expectTypeOf(bffDb.beginTemporaryPasswordReset).returns.toEqualTypeOf<
+      Promise<{ operationId: string; expiresAt: string }>
+    >()
+    expectTypeOf<
+      Parameters<typeof bffDb.completeTemporaryPasswordReset>
+    >().toEqualTypeOf<
+      [
+        input: {
+          actorUserId: string
+          sessionId: string
+          operationId: string
+          correlationId: string
+        },
+      ]
+    >()
+    expectTypeOf(bffDb.completeTemporaryPasswordReset).returns.toEqualTypeOf<
+      Promise<void>
+    >()
+    expectTypeOf<
+      Parameters<typeof bffDb.failTemporaryPasswordReset>
+    >().toEqualTypeOf<
+      [
+        input: {
+          actorUserId: string
+          sessionId: string
+          operationId: string
+          reasonCode:
+            | "AUTH_PROVIDER_FAILURE"
+            | "AUTH_COMPLETION_FAILURE"
+            | "AUTH_CALL_NOT_ATTEMPTED"
+          correlationId: string
+        },
+      ]
+    >()
+    expectTypeOf(bffDb.failTemporaryPasswordReset).returns.toEqualTypeOf<
+      Promise<void>
+    >()
+    expectTypeOf<
+      Parameters<typeof bffDb.completeTemporaryPasswordChange>
+    >().toEqualTypeOf<
+      [
+        input: {
+          actorUserId: string
+          sessionId: string
+          correlationId: string
+        },
+      ]
+    >()
+    expectTypeOf(bffDb.completeTemporaryPasswordChange).returns.toEqualTypeOf<
+      Promise<void>
+    >()
   })
 
   it("keeps the SQL client private and uses static private function names", () => {
@@ -152,9 +219,13 @@ describe("bffDb boundary", () => {
     ).sort()
     expect(staticRoutineNames).toEqual([
       "assert_auth_session",
+      "begin_temporary_password_reset",
       "clear_rate_limit",
+      "complete_temporary_password_change",
+      "complete_temporary_password_reset",
       "consume_rate_limit",
       "fail_closed_login_session",
+      "fail_temporary_password_reset",
       "register_auth_session",
       "revoke_sessions_and_write_logout",
       "rotate_app_session_after_reauthentication",

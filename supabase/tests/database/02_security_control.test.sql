@@ -684,15 +684,19 @@ select results_eq(
     order by function.oid::regprocedure::text$$,
   $$values
     ('private.assert_auth_session(uuid,uuid)'),
+    ('private.begin_temporary_password_reset(uuid,uuid,uuid,uuid)'),
     ('private.clear_rate_limit(text,text)'),
+    ('private.complete_temporary_password_change(uuid,uuid,uuid)'),
+    ('private.complete_temporary_password_reset(uuid,uuid,uuid,uuid)'),
     ('private.consume_rate_limit(text,text,integer,integer,integer)'),
     ('private.fail_closed_login_session(uuid,uuid,text,uuid)'),
+    ('private.fail_temporary_password_reset(uuid,uuid,uuid,text,uuid)'),
     ('private.register_auth_session(uuid,uuid,boolean)'),
     ('private.revoke_sessions_and_write_logout(uuid,uuid,uuid,text,text)'),
     ('private.rotate_app_session_after_reauthentication(uuid,uuid,uuid,uuid)'),
     ('private.write_authenticated_audit_event(uuid,uuid,text,text,uuid,audit_outcome,text,uuid,text,text,jsonb)'),
     ('private.write_security_event(text,uuid,text,text,audit_outcome,text,uuid,jsonb)')$$,
-  'axsys_bff recebe exatamente nove EXECUTEs efetivos, incluindo memberships'
+  'axsys_bff recebe exatamente treze EXECUTEs efetivos, incluindo memberships'
 );
 select results_eq(
   $$select role_name::text collate "default",

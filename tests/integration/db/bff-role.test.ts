@@ -618,6 +618,7 @@ describe("axsys_bff", () => {
     "private.rate_limit_buckets",
     "private.auth_session_controls",
     "private.auth_user_session_cutoffs",
+    "private.auth_password_operations",
   ] as const)("cannot read Task 6 table %s directly", async (relation) => {
     const [catalog] = await postgresOwnerSql<[{ exists: boolean }]>`
       select to_regclass(${relation}) is not null as exists
@@ -642,6 +643,10 @@ describe("axsys_bff", () => {
       "guard_auth_session_control_update",
       "select private.guard_auth_session_control_update()",
     ],
+    [
+      "guard_auth_password_operation_update",
+      "select private.guard_auth_password_operation_update()",
+    ],
   ] as const)("cannot execute owner-only core %s", async (_routine, statement) => {
     await expect(sql.unsafe(statement)).rejects.toMatchObject({
       code: "42501",
@@ -649,19 +654,26 @@ describe("axsys_bff", () => {
     })
   })
 
-  it("has no effective USAGE on the private session-state type", async () => {
-    const [privilege] = await sql<[{ canUsePrivateSessionState: boolean }]>`
-      select has_type_privilege(
-        current_user,
+  it("has no effective USAGE on private control types", async () => {
+    const privileges = await sql<{ typeName: string; canUse: boolean }[]>`
+      select type_name as "typeName",
+             has_type_privilege(current_user, type_name, 'USAGE') as "canUse"
+      from unnest(array[
         'private.auth_session_state',
-        'USAGE'
-      ) as "canUsePrivateSessionState"
+        'private.auth_password_operation_kind',
+        'private.auth_password_operation_status'
+      ]) type_name
+      order by type_name
     `
 
-    expect(privilege?.canUsePrivateSessionState).toBe(false)
+    expect(privileges).toEqual([
+      { typeName: "private.auth_password_operation_kind", canUse: false },
+      { typeName: "private.auth_password_operation_status", canUse: false },
+      { typeName: "private.auth_session_state", canUse: false },
+    ])
   })
 
-  it("has EXECUTE on all and only the nine allowlisted boundaries", async () => {
+  it("has EXECUTE on all and only the thirteen allowlisted boundaries", async () => {
     const routines = await postgresOwnerSql<{ routineName: string }[]>`
       select function.proname as "routineName"
       from pg_proc function
@@ -673,9 +685,13 @@ describe("axsys_bff", () => {
 
     expect(routines.map(({ routineName }) => routineName)).toEqual([
       "assert_auth_session",
+      "begin_temporary_password_reset",
       "clear_rate_limit",
+      "complete_temporary_password_change",
+      "complete_temporary_password_reset",
       "consume_rate_limit",
       "fail_closed_login_session",
+      "fail_temporary_password_reset",
       "register_auth_session",
       "revoke_sessions_and_write_logout",
       "rotate_app_session_after_reauthentication",
@@ -684,7 +700,7 @@ describe("axsys_bff", () => {
     ])
   })
 
-  it("executes every allowlisted boundary with authoritative fixtures", async () => {
+  it("executes every Task 6 boundary with authoritative fixtures", async () => {
     const [sessionId, failClosedSessionId, reauthenticatedSessionId] =
       SECURITY_BOUNDARY_SESSION_IDS
     const [
