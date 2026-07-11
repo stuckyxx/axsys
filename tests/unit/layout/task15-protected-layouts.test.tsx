@@ -15,11 +15,13 @@ const mocks = vi.hoisted(() => ({
   headers: vi.fn(),
   requireCompanyContext: vi.fn(),
   requirePlatformContext: vi.fn(),
+  routerRefresh: vi.fn(),
 }))
 
 vi.mock("next/navigation", () => ({
   redirect: mocks.redirect,
   usePathname: () => "/platform",
+  useRouter: () => ({ refresh: mocks.routerRefresh }),
 }))
 vi.mock("next/headers", () => ({ headers: mocks.headers }))
 vi.mock("@/modules/auth/server/guards", () => ({
@@ -175,19 +177,30 @@ describe("Task 15 protected layouts", () => {
     const user = userEvent.setup()
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce(
-          new Response(JSON.stringify({ token: "csrf-token" }), {
-            status: 200,
-          }),
+      vi.fn((input: RequestInfo | URL) => {
+        const path = String(input)
+        if (path === "/api/auth/me") {
+          return Promise.resolve(
+            Response.json({
+              kind: "platform",
+              userId: "10000000-0000-4000-8000-000000000001",
+              modules: [],
+              profile: {
+                displayName: "Administrador",
+                email: "admin@example.test",
+                preferredTheme: "dark",
+                version: 1,
+              },
+            }),
+          )
+        }
+        if (path === "/api/auth/csrf") {
+          return Promise.resolve(Response.json({ token: "csrf-token" }))
+        }
+        return Promise.resolve(
+          Response.json({ preferredTheme: "light", version: 2 }),
         )
-        .mockResolvedValueOnce(
-          new Response(
-            JSON.stringify({ preferredTheme: "light", version: 2 }),
-            { status: 200 },
-          ),
-        ),
+      }),
     )
 
     render(

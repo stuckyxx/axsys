@@ -31,41 +31,64 @@ describe("browser Supabase capability", () => {
     expect(() => browser.getBrowserRealtime()).toThrow()
   })
 
-  it("returns only frozen channel lifecycle methods from one non-persistent client", async () => {
+  it("creates one disposable realtime capability per protected mount", async () => {
     stubPublicEnv()
-    const rawClient = {
+    const rawClients = ["scope-a", "scope-b"].map((scope) => ({
+      scope,
       channel: vi.fn(function (this: object, topic: string) {
         return { owner: this, topic }
       }),
-      removeChannel: vi.fn(function (this: object, channel: object) {
-        return Promise.resolve({ owner: this, channel })
-      }),
+      removeChannel: vi.fn().mockResolvedValue("ok"),
+      removeAllChannels: vi.fn().mockResolvedValue([]),
+      realtime: {
+        setAuth: vi.fn().mockResolvedValue(undefined),
+        disconnect: vi.fn(),
+      },
       from: vi.fn(),
       rpc: vi.fn(),
       storage: {},
       auth: {},
-    }
-    createClientMock.mockReturnValue(rawClient)
-    const fetchMock = vi.fn().mockResolvedValue(
-      Response.json({ accessToken: "realtime-access-token" }),
+    }))
+    let clientIndex = 0
+    createClientMock.mockImplementation(
+      (_url: string, _key: string, options: { accessToken: () => Promise<string> }) => {
+        const client = rawClients[clientIndex]
+        clientIndex += 1
+        client.realtime.setAuth.mockImplementation(async () => {
+          await options.accessToken()
+        })
+        return client
+      },
+    )
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        Response.json({ accessToken: `realtime-access-token-${fetchMock.mock.calls.length}` }),
+      ),
     )
     vi.stubGlobal("fetch", fetchMock)
     const { getBrowserRealtime } = await import("@/lib/supabase/browser")
 
-    const capability = getBrowserRealtime()
-    expect(getBrowserRealtime()).toBe(capability)
-    expect(Object.keys(capability).sort()).toEqual(["channel", "removeChannel"])
-    expect(Object.isFrozen(capability)).toBe(true)
-    expect(capability).not.toHaveProperty("from")
-    expect(capability).not.toHaveProperty("rpc")
-    expect(capability).not.toHaveProperty("storage")
-    expect(capability).not.toHaveProperty("auth")
-    expect(capability.channel("updates")).toEqual({
-      owner: rawClient,
+    const first = getBrowserRealtime()
+    const second = getBrowserRealtime()
+    expect(first).not.toBe(second)
+    expect(Object.keys(first).sort()).toEqual([
+      "channel",
+      "dispose",
+      "refreshAuth",
+      "removeChannel",
+    ])
+    expect(Object.isFrozen(first)).toBe(true)
+    expect(first).not.toHaveProperty("from")
+    expect(first).not.toHaveProperty("rpc")
+    expect(first).not.toHaveProperty("storage")
+    expect(first).not.toHaveProperty("auth")
+    expect(first).not.toHaveProperty("accessToken")
+    expect(first.channel("updates")).toEqual({
+      owner: rawClients[0],
       topic: "updates",
     })
 
-    expect(createClientMock).toHaveBeenCalledOnce()
+    expect(createClientMock).toHaveBeenCalledTimes(2)
     const [url, key, options] = createClientMock.mock.calls[0]
     expect(url).toBe(PUBLIC_ENV.NEXT_PUBLIC_SUPABASE_URL)
     expect(key).toBe(PUBLIC_ENV.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY)
@@ -74,11 +97,19 @@ describe("browser Supabase capability", () => {
       autoRefreshToken: false,
       detectSessionInUrl: false,
     })
-    await expect(options.accessToken()).resolves.toBe("realtime-access-token")
-    expect(fetchMock).toHaveBeenCalledWith("/api/auth/realtime-token", {
+    await expect(options.accessToken()).resolves.toBe("realtime-access-token-1")
+    await expect(options.accessToken()).resolves.toBe("realtime-access-token-2")
+    await first.refreshAuth()
+    expect(rawClients[0].realtime.setAuth).toHaveBeenCalledWith()
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/auth/realtime-token", {
       credentials: "same-origin",
       cache: "no-store",
     })
+
+    await first.dispose()
+    expect(rawClients[0].removeAllChannels).toHaveBeenCalledOnce()
+    expect(rawClients[0].realtime.disconnect).toHaveBeenCalledOnce()
+    expect(rawClients[1].removeAllChannels).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -112,5 +143,7 @@ describe("browser Supabase capability", () => {
     expect(source).not.toContain(".storage")
     expect(source).not.toContain("persistSession: true")
     expect(source).not.toContain("autoRefreshToken: true")
+    expect(source).not.toMatch(/let\s+realtime(?:Client|Capability)/u)
+    expect(source).not.toMatch(/localStorage|sessionStorage|indexedDB/iu)
   })
 })
