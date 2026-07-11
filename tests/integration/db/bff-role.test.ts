@@ -477,10 +477,21 @@ describe("axsys_bff", () => {
     expect(privileges).toEqual({ usage: false, create: false })
   })
 
-  it("cannot read an application table directly", async () => {
-    await expect(sql`select * from public.companies`).rejects.toMatchObject({
-      code: expect.stringMatching(/^(?:42501|42P01)$/u),
-      message: expect.stringMatching(/permission denied|does not exist/u),
+  it.each([
+    "profiles",
+    "platform_roles",
+    "companies",
+    "company_memberships",
+    "member_modules",
+  ] as const)("cannot read public.%s directly", async (table) => {
+    const [catalog] = await postgresOwnerSql<[{ exists: boolean }]>`
+      select to_regclass(${`public.${table}`}) is not null as exists
+    `
+    expect(catalog.exists).toBe(true)
+
+    await expect(sql.unsafe(`select * from public.${table}`)).rejects.toMatchObject({
+      code: "42501",
+      message: expect.stringMatching(/permission denied/u),
     })
   })
 })
