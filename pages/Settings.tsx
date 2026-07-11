@@ -1,10 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { useAuth } from '../context/AuthContext';
 import { useTrackedStorageRefresh } from '../hooks/useTrackedStorageRefresh.ts';
 import { updateUserDetailsMock } from '../services/authService';
 import { buildCompanyAddress, getCompanyById, saveCompany, fileToBase64, getCompanySettings } from '../services/companyService';
+import {
+  applyCompanySettingsDraft,
+  clearCompanySettingsDraft,
+  saveCompanySettingsDraft,
+} from '../utils/companySettingsDraft.ts';
 import { Company, SystemModule, UserRole } from '../types';
 
 export const Settings: React.FC = () => {
@@ -28,6 +33,23 @@ export const Settings: React.FC = () => {
 
   const [companyData, setCompanyData] = useState<Company | null>(null);
 
+  const resolveCompanyData = useCallback(() => {
+    if (!user) {
+      return null;
+    }
+
+    const savedCompany = user.companyId
+      ? getCompanyById(user.companyId) || getCompanySettings()
+      : getCompanySettings();
+
+    return applyCompanySettingsDraft(savedCompany);
+  }, [user]);
+
+  const updateCompanyData = useCallback((updatedCompanyData: Company) => {
+    setCompanyData(updatedCompanyData);
+    saveCompanySettingsDraft(updatedCompanyData);
+  }, []);
+
   useEffect(() => {
     if (user) {
       setProfileData({
@@ -36,18 +58,9 @@ export const Settings: React.FC = () => {
         avatarUrl: user.avatarUrl || '',
       });
 
-      if (user.companyId) {
-        const company = getCompanyById(user.companyId);
-        if (company) {
-          setCompanyData(company);
-        } else {
-          setCompanyData(getCompanySettings());
-        }
-      } else {
-        setCompanyData(getCompanySettings());
-      }
+      setCompanyData(resolveCompanyData());
     }
-  }, [user]);
+  }, [user, resolveCompanyData]);
 
   useEffect(() => {
     if (!canViewCompanyData && activeTab === 'company') {
@@ -63,11 +76,7 @@ export const Settings: React.FC = () => {
         return;
       }
 
-      if (user.companyId) {
-        setCompanyData(getCompanyById(user.companyId) || getCompanySettings());
-      } else {
-        setCompanyData(getCompanySettings());
-      }
+      setCompanyData(resolveCompanyData());
     },
   });
 
@@ -110,7 +119,7 @@ export const Settings: React.FC = () => {
     if (e.target.files?.[0] && companyData) {
       try {
         const base64 = await fileToBase64(e.target.files[0]);
-        setCompanyData({ ...companyData, letterheadUrl: base64 });
+        updateCompanyData({ ...companyData, letterheadUrl: base64 });
       } catch {
         showNotification('error', 'Erro ao processar imagem do timbrado.');
       }
@@ -126,7 +135,7 @@ export const Settings: React.FC = () => {
     if (e.target.files?.[0] && companyData) {
       try {
         const base64 = await fileToBase64(e.target.files[0]);
-        setCompanyData({ ...companyData, signatureUrl: base64 });
+        updateCompanyData({ ...companyData, signatureUrl: base64 });
       } catch {
         showNotification('error', 'Erro ao processar imagem da assinatura.');
       }
@@ -146,6 +155,7 @@ export const Settings: React.FC = () => {
       const dataToSave = { ...companyData, address: fullAddress };
 
       saveCompany(dataToSave);
+      clearCompanySettingsDraft(dataToSave.id);
       setCompanyData(dataToSave);
       showNotification('success', 'Dados da empresa salvos com sucesso!');
     } catch {
@@ -274,7 +284,7 @@ export const Settings: React.FC = () => {
                   <Input
                     label="Razão Social"
                     value={companyData.corporateName || ''}
-                    onChange={(e) => setCompanyData({ ...companyData, corporateName: e.target.value })}
+                    onChange={(e) => updateCompanyData({ ...companyData, corporateName: e.target.value })}
                     disabled={!canEditCompanyData}
                   />
                 </div>
@@ -283,7 +293,7 @@ export const Settings: React.FC = () => {
                   <Input
                     label="CNPJ"
                     value={companyData.cnpj || ''}
-                    onChange={(e) => setCompanyData({ ...companyData, cnpj: e.target.value })}
+                    onChange={(e) => updateCompanyData({ ...companyData, cnpj: e.target.value })}
                     disabled={!canEditCompanyData}
                   />
                 </div>
@@ -292,7 +302,7 @@ export const Settings: React.FC = () => {
                   <Input
                     label="Rua"
                     value={companyData.street || ''}
-                    onChange={(e) => setCompanyData({ ...companyData, street: e.target.value })}
+                    onChange={(e) => updateCompanyData({ ...companyData, street: e.target.value })}
                     disabled={!canEditCompanyData}
                   />
                 </div>
@@ -301,7 +311,7 @@ export const Settings: React.FC = () => {
                   <Input
                     label="Número"
                     value={companyData.number || ''}
-                    onChange={(e) => setCompanyData({ ...companyData, number: e.target.value })}
+                    onChange={(e) => updateCompanyData({ ...companyData, number: e.target.value })}
                     disabled={!canEditCompanyData}
                   />
                 </div>
@@ -310,7 +320,7 @@ export const Settings: React.FC = () => {
                   <Input
                     label="Bairro"
                     value={companyData.neighborhood || ''}
-                    onChange={(e) => setCompanyData({ ...companyData, neighborhood: e.target.value })}
+                    onChange={(e) => updateCompanyData({ ...companyData, neighborhood: e.target.value })}
                     disabled={!canEditCompanyData}
                   />
                 </div>
@@ -319,7 +329,7 @@ export const Settings: React.FC = () => {
                   <Input
                     label="CEP"
                     value={companyData.zipCode || ''}
-                    onChange={(e) => setCompanyData({ ...companyData, zipCode: e.target.value })}
+                    onChange={(e) => updateCompanyData({ ...companyData, zipCode: e.target.value })}
                     disabled={!canEditCompanyData}
                   />
                 </div>
@@ -328,7 +338,7 @@ export const Settings: React.FC = () => {
                   <Input
                     label="Municipio"
                     value={companyData.city || ''}
-                    onChange={(e) => setCompanyData({ ...companyData, city: e.target.value })}
+                    onChange={(e) => updateCompanyData({ ...companyData, city: e.target.value })}
                     disabled={!canEditCompanyData}
                   />
                 </div>
@@ -337,7 +347,7 @@ export const Settings: React.FC = () => {
                   <Input
                     label="UF"
                     value={companyData.state || ''}
-                    onChange={(e) => setCompanyData({ ...companyData, state: e.target.value })}
+                    onChange={(e) => updateCompanyData({ ...companyData, state: e.target.value })}
                     disabled={!canEditCompanyData}
                   />
                 </div>
@@ -346,7 +356,7 @@ export const Settings: React.FC = () => {
                   <Input
                     label="Representante Legal"
                     value={companyData.representative || ''}
-                    onChange={(e) => setCompanyData({ ...companyData, representative: e.target.value })}
+                    onChange={(e) => updateCompanyData({ ...companyData, representative: e.target.value })}
                     disabled={!canEditCompanyData}
                   />
                 </div>
@@ -355,7 +365,7 @@ export const Settings: React.FC = () => {
                   <Input
                     label="CPF do Representante"
                     value={companyData.cpf || ''}
-                    onChange={(e) => setCompanyData({ ...companyData, cpf: e.target.value })}
+                    onChange={(e) => updateCompanyData({ ...companyData, cpf: e.target.value })}
                     disabled={!canEditCompanyData}
                   />
                 </div>
@@ -411,7 +421,7 @@ export const Settings: React.FC = () => {
                   <Input
                     label="Aliquota Padrão de Imposto (%)"
                     value={companyData.taxRate?.toString() || ''}
-                    onChange={(e) => setCompanyData({ ...companyData, taxRate: parseFloat(e.target.value) || 0 })}
+                    onChange={(e) => updateCompanyData({ ...companyData, taxRate: parseFloat(e.target.value) || 0 })}
                     type="number"
                     disabled={!canEditCompanyData}
                   />

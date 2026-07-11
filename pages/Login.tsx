@@ -4,23 +4,21 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
+import { AxsysFullLogo, AxsysMarkIcon } from '../components/AxsysBrand';
 import { getPostLoginPath } from '../utils/auth.ts';
+import { LOGIN_BRANDING } from '../utils/loginBranding.ts';
 
-// Axsys Large Logo Component for Login
-const AxsysLogoLarge = () => (
-    <svg className="w-24 h-24 mb-6" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="axsysGradientLarge" x1="0%" y1="100%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor="#3b82f6" />
-          <stop offset="50%" stopColor="#8b5cf6" />
-          <stop offset="100%" stopColor="#f97316" />
-        </linearGradient>
-      </defs>
-      <path d="M20 90 L45 20 L55 20 L80 90" stroke="url(#axsysGradientLarge)" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M30 65 L70 65" stroke="url(#axsysGradientLarge)" strokeWidth="6" strokeLinecap="round" />
-      <path d="M55 45 L85 15 M85 15 L65 15 M85 15 L85 35" stroke="#f97316" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+const EmailIcon = () => (
+  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207" />
+  </svg>
+);
+
+const PasswordIcon = () => (
+  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
     </svg>
-  );
+);
 
 export const Login: React.FC = () => {
   const { login } = useAuth();
@@ -49,116 +47,117 @@ export const Login: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex bg-gray-50">
-      {/* Left Column - Branding (Dark) */}
-      <div className="hidden lg:flex lg:w-1/2 relative bg-brand-900 overflow-hidden items-center justify-center">
-        <div className="absolute inset-0 opacity-10" 
-             style={{
-                backgroundImage: `radial-gradient(#3b82f6 1px, transparent 1px), radial-gradient(#3b82f6 1px, transparent 1px)`,
-                backgroundSize: '40px 40px',
-                backgroundPosition: '0 0, 20px 20px'
-             }}>
-        </div>
-        <div className="absolute inset-0 bg-gradient-to-br from-brand-900 via-brand-900 to-brand-800 opacity-90"></div>
-        
-        <div className="relative z-10 p-12 text-center flex flex-col items-center">
-          <AxsysLogoLarge />
-          
-          <h1 className="text-5xl font-extrabold text-white tracking-tight mb-4 font-sans">
-            Axsys
-          </h1>
-          <div className="h-1 w-24 bg-gradient-to-r from-blue-500 via-purple-500 to-orange-500 rounded-full mb-6"></div>
-          
-          <p className="text-lg text-brand-200 tracking-widest font-light uppercase">
-            Technology <span className="text-accent-orange mx-2">|</span> Growth <span className="text-accent-purple mx-2">|</span> Design
-          </p>
-
-          <p className="mt-8 text-brand-300 max-w-md mx-auto text-sm leading-relaxed opacity-80">
-            Advanced ERP solutions designed to streamline your business operations with cutting-edge technology and intuitive design.
-          </p>
-        </div>
-      </div>
-
-      {/* Right Column - Form (Light) */}
-      <div className="w-full lg:w-1/2 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-20 xl:px-24 bg-white">
-        <div className="mx-auto w-full max-w-sm lg:w-96">
-          <div className="lg:hidden mb-10 text-center flex flex-col items-center">
-             <AxsysLogoLarge />
-             <h2 className="text-3xl font-extrabold text-brand-900">Axsys</h2>
+    <main className="min-h-[100dvh] bg-slate-50 text-slate-900 lg:grid lg:grid-cols-[minmax(0,1.05fr)_minmax(460px,0.95fr)]">
+      <section className="login-brand-panel relative hidden min-h-[100dvh] overflow-hidden bg-[#111820] lg:flex lg:items-center lg:justify-center">
+        <div className="relative z-10 flex w-full max-w-[560px] flex-col px-12">
+          <div className="login-logo-glow flex justify-center">
+            <AxsysFullLogo />
           </div>
 
-          <div>
-            <h2 className="text-3xl font-bold text-gray-900">Portal do Usuário</h2>
-            <p className="mt-2 text-sm text-gray-600">
-              Acesse sua conta para gerenciar seu negócio.
+          <div className="mt-20 h-1 w-44 bg-[linear-gradient(90deg,#38bdf8_0%,#8b5cf6_50%,#f97316_100%)]" aria-hidden="true" />
+          <p className="mt-7 text-sm font-semibold text-slate-300">{LOGIN_BRANDING.securityLabel}</p>
+          <p className="mt-3 max-w-[34rem] text-sm leading-6 text-slate-400">{LOGIN_BRANDING.securityText}</p>
+        </div>
+      </section>
+
+      <section className="login-surface-grid flex min-h-[100dvh] w-full items-center justify-center px-6 py-10 sm:px-8 lg:px-16 xl:px-24">
+        <div className="w-full max-w-[430px]">
+          <div className="mb-9 flex items-center gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-slate-950 p-2.5 shadow-[0_18px_34px_-22px_rgba(15,23,42,0.9)]">
+              <AxsysMarkIcon className="h-full w-full" decorative />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-slate-950">AXSYS</p>
+              <p className="mt-1 text-sm text-slate-500">{LOGIN_BRANDING.formEyebrow}</p>
+            </div>
+          </div>
+
+          <div className="login-brand-panel relative -mx-6 mb-10 flex justify-center overflow-hidden px-6 py-10 sm:-mx-8 sm:px-8 lg:hidden">
+            <AxsysFullLogo className="login-logo-glow relative z-10" size="mobile" />
+          </div>
+
+          <div className="mb-10">
+            <h1 className="text-4xl font-extrabold leading-tight text-slate-950 sm:text-[2.65rem]">
+              {LOGIN_BRANDING.title}
+            </h1>
+            <p className="mt-4 max-w-[28rem] text-base leading-6 text-slate-600">
+              {LOGIN_BRANDING.subtitle}
             </p>
           </div>
 
-          <div className="mt-8">
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <Input
-                label="E-mail Corporativo"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="usuario@axsys.com"
-                required
-                icon={
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207" />
-                  </svg>
-                }
-              />
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <Input
+              label="E-mail corporativo"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="usuario@axsys.com"
+              required
+              icon={<EmailIcon />}
+            />
 
-              <div>
-                <Input
-                  label="Senha"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  required
-                  icon={
-                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            <div>
+              <Input
+                label="Senha"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+                icon={<PasswordIcon />}
+              />
+              <div className="mt-2 flex items-center justify-between gap-4">
+                <div className="flex items-center">
+                  <input
+                    id="remember-me"
+                    name="remember-me"
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                  />
+                  <label htmlFor="remember-me" className="ml-2 block text-sm text-slate-700">
+                    Lembrar-me
+                  </label>
+                </div>
+                <button type="button" className="text-sm font-semibold text-brand-600 transition-colors hover:text-brand-700">
+                  Esqueceu a senha?
+                </button>
+              </div>
+            </div>
+
+            {error && (
+              <div className="animate-fade-in-down rounded-xl border border-red-100 bg-red-50 p-4">
+                <div className="flex">
+                  <div className="flex-shrink-0">
+                    <svg className="h-5 w-5 text-red-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
                     </svg>
-                  }
-                />
-                <div className="flex items-center justify-between mt-2">
-                  <div className="flex items-center">
-                    <input id="remember-me" name="remember-me" type="checkbox" className="h-4 w-4 text-brand-600 focus:ring-brand-500 border-gray-300 rounded" />
-                    <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-900">Lembrar-me</label>
                   </div>
-                  <div className="text-sm">
-                    <a href="#" className="font-medium text-brand-600 hover:text-brand-500">
-                      Esqueceu a senha?
-                    </a>
+                  <div className="ml-3">
+                    <h2 className="text-sm font-semibold text-red-800">{error}</h2>
                   </div>
                 </div>
               </div>
+            )}
 
-              {error && (
-                <div className="rounded-md bg-red-50 p-4 border border-red-100 animate-fade-in-down">
-                  <div className="flex">
-                    <div className="flex-shrink-0">
-                      <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                      </svg>
-                    </div>
-                    <div className="ml-3">
-                      <h3 className="text-sm font-medium text-red-800">{error}</h3>
-                    </div>
-                  </div>
-                </div>
-              )}
+            <Button
+              type="submit"
+              fullWidth
+              isLoading={isLoading}
+              className="h-14 rounded-xl border-0 bg-[linear-gradient(100deg,#3b82f6_0%,#7c3aed_48%,#f97316_100%)] py-3 font-bold shadow-[0_18px_38px_-18px_rgba(37,99,235,0.65)] transition-all duration-200 hover:-translate-y-0.5 hover:opacity-95 hover:shadow-[0_22px_44px_-20px_rgba(249,115,22,0.55)] active:translate-y-0"
+            >
+              Entrar no Sistema
+            </Button>
+          </form>
 
-              <Button type="submit" fullWidth isLoading={isLoading} className="py-3 bg-axsys-gradient border-0 hover:opacity-90 transition-opacity">
-                Entrar no Sistema
-              </Button>
-            </form>
+          <div className="mt-8 flex flex-col gap-3 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+            <p>Acesso protegido por autenticação corporativa</p>
+            <span className="inline-flex w-fit items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" aria-hidden="true" />
+              {LOGIN_BRANDING.connectionLabel}
+            </span>
           </div>
         </div>
-      </div>
-    </div>
+      </section>
+    </main>
   );
 };
