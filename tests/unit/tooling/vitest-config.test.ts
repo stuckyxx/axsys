@@ -21,7 +21,7 @@ describe("Vitest project isolation", () => {
     expect(loadedConfig).not.toBeNull()
 
     const rootConfig = loadedConfig?.config as {
-      resolve?: { alias?: Record<string, string> }
+      resolve?: { alias?: Record<string, string>; tsconfigPaths?: boolean }
       test?: { projects?: InlineProject[] }
     }
     const projectNamed = (name: string) =>
@@ -30,6 +30,7 @@ describe("Vitest project isolation", () => {
     const nodeProject = projectNamed("node")
 
     expect(rootConfig.resolve?.alias ?? {}).not.toHaveProperty("server-only")
+    expect(rootConfig.resolve?.tsconfigPaths).toBe(true)
     expect(uiProject?.test).toMatchObject({
       environment: "jsdom",
       include: ["tests/unit/**/*.{test,spec}.tsx"],
