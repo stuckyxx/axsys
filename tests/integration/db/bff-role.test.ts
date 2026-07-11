@@ -26,6 +26,121 @@ const supabaseAdminOwnerSql = postgres(supabaseAdminUrl.toString(), {
   prepare: false,
 })
 
+const SECURITY_BOUNDARY_USER_ID = "62000000-0000-4000-8000-000000000001"
+const SECURITY_BOUNDARY_SESSION_IDS = [
+  "92000000-0000-4000-8000-000000000001",
+  "92000000-0000-4000-8000-000000000002",
+  "92000000-0000-4000-8000-000000000003",
+] as const
+const SECURITY_BOUNDARY_CORRELATION_IDS = [
+  "72000000-0000-4000-8000-000000000001",
+  "72000000-0000-4000-8000-000000000002",
+  "72000000-0000-4000-8000-000000000003",
+  "72000000-0000-4000-8000-000000000004",
+  "72000000-0000-4000-8000-000000000005",
+] as const
+const SECURITY_BOUNDARY_RATE_KEYS = ["62".repeat(32), "63".repeat(32)] as const
+
+async function cleanupSecurityBoundaryFixtures(): Promise<void> {
+  await postgresOwnerSql.begin(async (transaction) => {
+    const [catalog] = await transaction<
+      [{ auditEvents: boolean; securityEvents: boolean; sessionControls: boolean }]
+    >`
+      select
+        to_regclass('public.audit_events') is not null as "auditEvents",
+        to_regclass('public.security_events') is not null as "securityEvents",
+        to_regclass('private.auth_session_controls') is not null as "sessionControls"
+    `
+
+    if (catalog.auditEvents && catalog.securityEvents) {
+      await transaction.unsafe(
+        "lock table public.audit_events, public.security_events in access exclusive mode",
+      )
+      const triggerStates = await transaction<
+        { triggerName: string; enabled: string }[]
+      >`
+        select tgname as "triggerName", tgenabled as enabled
+        from pg_trigger
+        where (tgrelid, tgname) in (
+          ('public.audit_events'::regclass, 'audit_events_append_only'),
+          ('public.security_events'::regclass, 'security_events_append_only')
+        )
+          and not tgisinternal
+        order by tgname
+      `
+      expect(triggerStates).toEqual([
+        { triggerName: "audit_events_append_only", enabled: "O" },
+        { triggerName: "security_events_append_only", enabled: "O" },
+      ])
+
+      await transaction.unsafe(
+        "alter table public.audit_events disable trigger audit_events_append_only",
+      )
+      await transaction.unsafe(
+        "alter table public.security_events disable trigger security_events_append_only",
+      )
+      await transaction`
+        delete from public.audit_events
+        where correlation_id = any(${[...SECURITY_BOUNDARY_CORRELATION_IDS]}::uuid[])
+      `
+      await transaction`
+        delete from public.security_events
+        where correlation_id = any(${[...SECURITY_BOUNDARY_CORRELATION_IDS]}::uuid[])
+      `
+      await transaction.unsafe(
+        "alter table public.audit_events enable trigger audit_events_append_only",
+      )
+      await transaction.unsafe(
+        "alter table public.security_events enable trigger security_events_append_only",
+      )
+
+      const restored = await transaction<{ enabled: string }[]>`
+        select tgenabled as enabled
+        from pg_trigger
+        where (tgrelid, tgname) in (
+          ('public.audit_events'::regclass, 'audit_events_append_only'),
+          ('public.security_events'::regclass, 'security_events_append_only')
+        )
+          and not tgisinternal
+        order by tgname
+      `
+      expect(restored).toEqual([{ enabled: "O" }, { enabled: "O" }])
+    }
+
+    if (catalog.sessionControls) {
+      await transaction`
+        delete from private.rate_limit_buckets
+        where key_hash = any(${[...SECURITY_BOUNDARY_RATE_KEYS]}::text[])
+      `
+      await transaction`
+        delete from private.auth_session_controls
+        where session_id = any(${[...SECURITY_BOUNDARY_SESSION_IDS]}::uuid[])
+      `
+      await transaction`
+        delete from private.auth_user_session_cutoffs
+        where user_id = ${SECURITY_BOUNDARY_USER_ID}::uuid
+      `
+    }
+
+    await transaction`
+      delete from public.platform_roles
+      where user_id = ${SECURITY_BOUNDARY_USER_ID}::uuid
+    `
+    await transaction`
+      delete from auth.sessions
+      where id = any(${[...SECURITY_BOUNDARY_SESSION_IDS]}::uuid[])
+    `
+    await transaction`
+      delete from public.profiles
+      where user_id = ${SECURITY_BOUNDARY_USER_ID}::uuid
+    `
+    await transaction`
+      delete from auth.users
+      where id = ${SECURITY_BOUNDARY_USER_ID}::uuid
+    `
+  })
+}
+
 afterAll(async () => {
   await Promise.all([sql.end(), postgresOwnerSql.end(), supabaseAdminOwnerSql.end()])
 })
@@ -493,5 +608,264 @@ describe("axsys_bff", () => {
       code: "42501",
       message: expect.stringMatching(/permission denied/u),
     })
+  })
+
+  it.each([
+    "public.audit_events",
+    "public.security_events",
+    "public.idempotency_keys",
+    "private.rate_limit_policies",
+    "private.rate_limit_buckets",
+    "private.auth_session_controls",
+    "private.auth_user_session_cutoffs",
+  ] as const)("cannot read Task 6 table %s directly", async (relation) => {
+    const [catalog] = await postgresOwnerSql<[{ exists: boolean }]>`
+      select to_regclass(${relation}) is not null as exists
+    `
+    expect(catalog.exists).toBe(true)
+
+    await expect(sql.unsafe(`select * from ${relation}`)).rejects.toMatchObject({
+      code: "42501",
+      message: expect.stringMatching(/permission denied/u),
+    })
+  })
+
+  it.each([
+    [
+      "revoke_auth_sessions",
+      "select private.revoke_auth_sessions(null::uuid, null::uuid)",
+    ],
+    ["resolve_audit_identity", "select * from private.resolve_audit_identity(null::uuid)"],
+    ["reject_append_only_mutation", "select private.reject_append_only_mutation()"],
+    ["guard_idempotency_key_update", "select private.guard_idempotency_key_update()"],
+    [
+      "guard_auth_session_control_update",
+      "select private.guard_auth_session_control_update()",
+    ],
+  ] as const)("cannot execute owner-only core %s", async (_routine, statement) => {
+    await expect(sql.unsafe(statement)).rejects.toMatchObject({
+      code: "42501",
+      message: expect.stringMatching(/permission denied/u),
+    })
+  })
+
+  it("has no effective USAGE on the private session-state type", async () => {
+    const [privilege] = await sql<[{ canUsePrivateSessionState: boolean }]>`
+      select has_type_privilege(
+        current_user,
+        'private.auth_session_state',
+        'USAGE'
+      ) as "canUsePrivateSessionState"
+    `
+
+    expect(privilege?.canUsePrivateSessionState).toBe(false)
+  })
+
+  it("has EXECUTE on all and only the nine allowlisted boundaries", async () => {
+    const routines = await postgresOwnerSql<{ routineName: string }[]>`
+      select function.proname as "routineName"
+      from pg_proc function
+      join pg_namespace namespace on namespace.oid = function.pronamespace
+      where namespace.nspname = 'private'
+        and has_function_privilege('axsys_bff', function.oid, 'EXECUTE')
+      order by function.proname
+    `
+
+    expect(routines.map(({ routineName }) => routineName)).toEqual([
+      "assert_auth_session",
+      "clear_rate_limit",
+      "consume_rate_limit",
+      "fail_closed_login_session",
+      "register_auth_session",
+      "revoke_sessions_and_write_logout",
+      "rotate_app_session_after_reauthentication",
+      "write_authenticated_audit_event",
+      "write_security_event",
+    ])
+  })
+
+  it("executes every allowlisted boundary with authoritative fixtures", async () => {
+    const [sessionId, failClosedSessionId, reauthenticatedSessionId] =
+      SECURITY_BOUNDARY_SESSION_IDS
+    const [
+      loginCorrelationId,
+      securityCorrelationId,
+      failClosedCorrelationId,
+      reauthenticationCorrelationId,
+      logoutCorrelationId,
+    ] = SECURITY_BOUNDARY_CORRELATION_IDS
+    const [accountFailureKey, clearedAccountFailureKey] =
+      SECURITY_BOUNDARY_RATE_KEYS
+    const rollback = new Error("rollback successful boundary probes")
+
+    await cleanupSecurityBoundaryFixtures()
+    await postgresOwnerSql.begin(async (transaction) => {
+      await transaction`
+        insert into auth.users (
+          id, instance_id, aud, role, email, encrypted_password,
+          email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+          created_at, updated_at
+        ) values (
+          ${SECURITY_BOUNDARY_USER_ID}::uuid,
+          '00000000-0000-0000-0000-000000000000'::uuid,
+          'authenticated',
+          'authenticated',
+          'bff-boundary@example.test',
+          '',
+          clock_timestamp(),
+          '{"provider":"email","providers":["email"]}'::jsonb,
+          '{}'::jsonb,
+          clock_timestamp(),
+          clock_timestamp()
+        )
+      `
+      await transaction`
+        insert into public.profiles (user_id, email, display_name)
+        values (
+          ${SECURITY_BOUNDARY_USER_ID}::uuid,
+          'bff-boundary@example.test',
+          'BFF Boundary'
+        )
+      `
+      await transaction`
+        insert into public.platform_roles (user_id)
+        values (${SECURITY_BOUNDARY_USER_ID}::uuid)
+      `
+      await transaction`
+        insert into auth.sessions (id, user_id, created_at, updated_at)
+        values
+          (${sessionId}::uuid, ${SECURITY_BOUNDARY_USER_ID}::uuid,
+           clock_timestamp() - interval '3 seconds', clock_timestamp()),
+          (${failClosedSessionId}::uuid, ${SECURITY_BOUNDARY_USER_ID}::uuid,
+           clock_timestamp() - interval '2 seconds', clock_timestamp()),
+          (${reauthenticatedSessionId}::uuid, ${SECURITY_BOUNDARY_USER_ID}::uuid,
+           clock_timestamp() - interval '1 second', clock_timestamp())
+      `
+    })
+
+    try {
+      try {
+        await sql.begin(async (transaction) => {
+          const [rateLimit] = await transaction<
+            [{ allowed: boolean; attempts: number; retryAfterSeconds: number }]
+          >`
+            select
+              allowed,
+              attempts,
+              retry_after_seconds as "retryAfterSeconds"
+            from private.consume_rate_limit(
+              'login-account-failure',
+              ${accountFailureKey},
+              5,
+              900,
+              900
+            )
+          `
+          expect(rateLimit).toEqual({
+            allowed: true,
+            attempts: 1,
+            retryAfterSeconds: 0,
+          })
+          await transaction`
+            select private.consume_rate_limit(
+              'reauth-account-failure',
+              ${clearedAccountFailureKey},
+              5,
+              900,
+              900
+            )
+          `
+          await transaction`
+            select private.clear_rate_limit(
+              'reauth-account-failure',
+              ${clearedAccountFailureKey}
+            )
+          `
+
+          const [registration] = await transaction<[{ expiresAt: Date }]>`
+            select private.register_auth_session(
+              ${sessionId}::uuid,
+              ${SECURITY_BOUNDARY_USER_ID}::uuid,
+              false
+            ) as "expiresAt"
+          `
+          expect(registration.expiresAt).toBeInstanceOf(Date)
+
+          await transaction`
+            select private.write_authenticated_audit_event(
+              ${SECURITY_BOUNDARY_USER_ID}::uuid,
+              ${sessionId}::uuid,
+              'auth.login',
+              'session',
+              null::uuid,
+              ${"success"},
+              null,
+              ${loginCorrelationId}::uuid,
+              null,
+              null,
+              '{}'::jsonb
+            )
+          `
+          const [active] = await transaction<[{ active: boolean }]>`
+            select private.assert_auth_session(
+              ${sessionId}::uuid,
+              ${SECURITY_BOUNDARY_USER_ID}::uuid
+            ) as active
+          `
+          expect(active.active).toBe(true)
+
+          await transaction`
+            select private.register_auth_session(
+              ${failClosedSessionId}::uuid,
+              ${SECURITY_BOUNDARY_USER_ID}::uuid,
+              false
+            )
+          `
+          await transaction`
+            select private.fail_closed_login_session(
+              ${SECURITY_BOUNDARY_USER_ID}::uuid,
+              ${failClosedSessionId}::uuid,
+              'AUTH_CONTEXT_RESOLUTION_FAILED',
+              ${failClosedCorrelationId}::uuid
+            )
+          `
+          await transaction`
+            select private.rotate_app_session_after_reauthentication(
+              ${SECURITY_BOUNDARY_USER_ID}::uuid,
+              ${sessionId}::uuid,
+              ${reauthenticatedSessionId}::uuid,
+              ${reauthenticationCorrelationId}::uuid
+            )
+          `
+          await transaction`
+            select private.write_security_event(
+              'auth.password_recovery.requested',
+              null::uuid,
+              null,
+              null,
+              ${"success"},
+              null,
+              ${securityCorrelationId}::uuid,
+              '{}'::jsonb
+            )
+          `
+          await transaction`
+            select private.revoke_sessions_and_write_logout(
+              ${SECURITY_BOUNDARY_USER_ID}::uuid,
+              ${reauthenticatedSessionId}::uuid,
+              ${logoutCorrelationId}::uuid,
+              null,
+              null
+            )
+          `
+
+          throw rollback
+        })
+      } catch (error) {
+        if (error !== rollback) throw error
+      }
+    } finally {
+      await cleanupSecurityBoundaryFixtures()
+    }
   })
 })

@@ -25,6 +25,20 @@ as $$
   ) on conflict (id) do nothing;
 $$;
 
+create or replace function test_helpers.create_auth_session(
+  p_session_id uuid,
+  p_user_id uuid,
+  p_created_at timestamptz default clock_timestamp()
+) returns void
+language sql
+as $$
+  insert into auth.sessions (
+    id, user_id, created_at, updated_at
+  ) values (
+    p_session_id, p_user_id, p_created_at, p_created_at
+  ) on conflict (id) do nothing;
+$$;
+
 create or replace function test_helpers.create_company(
   p_company_id uuid,
   p_legal_name text,

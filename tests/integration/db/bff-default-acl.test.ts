@@ -77,29 +77,83 @@ describe("axsys_bff default ACL hardening", () => {
         await ownerSql.unsafe(`
           create table public.axsys_bff_acl_${owner}_existing_table(id bigint);
           create sequence public.axsys_bff_acl_${owner}_existing_sequence;
+          create function public.axsys_bff_acl_${owner}_existing_function()
+          returns integer
+          language sql
+          as 'select 1';
           grant all privileges
             on table public.axsys_bff_acl_${owner}_existing_table
-            to axsys_bff;
+            to public, anon, authenticated, service_role, axsys_bff;
           grant all privileges
             on sequence public.axsys_bff_acl_${owner}_existing_sequence
-            to axsys_bff;
+            to public, anon, authenticated, service_role, axsys_bff;
+          grant execute
+            on function public.axsys_bff_acl_${owner}_existing_function()
+            to public, anon, authenticated, service_role, axsys_bff;
         `)
 
         await ownerSql.unsafe(`
           alter default privileges for role ${owner}
-            grant all privileges on tables to axsys_bff;
+            grant all privileges on tables
+            to public, anon, authenticated, service_role, axsys_bff;
           alter default privileges for role ${owner} in schema public
-            grant all privileges on tables to axsys_bff;
+            grant all privileges on tables
+            to public, anon, authenticated, service_role, axsys_bff;
           alter default privileges for role ${owner}
-            grant all privileges on sequences to axsys_bff;
+            grant all privileges on sequences
+            to public, anon, authenticated, service_role, axsys_bff;
           alter default privileges for role ${owner} in schema public
-            grant all privileges on sequences to axsys_bff;
+            grant all privileges on sequences
+            to public, anon, authenticated, service_role, axsys_bff;
           alter default privileges for role ${owner}
-            grant all privileges on functions to axsys_bff;
+            grant all privileges on functions
+            to public, anon, authenticated, service_role, axsys_bff;
           alter default privileges for role ${owner} in schema public
-            grant all privileges on functions to axsys_bff;
+            grant all privileges on functions
+            to public, anon, authenticated, service_role, axsys_bff;
         `)
       }
+
+      const preHardeningPrivileges = await supabaseAdminOwnerSql<
+        {
+          owner: string
+          publicMaintain: boolean
+          bffMaintain: boolean
+          publicFunction: boolean
+          bffFunction: boolean
+        }[]
+      >`
+        select
+          owner,
+          has_table_privilege(
+            'anon',
+            format('public.axsys_bff_acl_%s_existing_table', owner),
+            'MAINTAIN'
+          ) as "publicMaintain",
+          has_table_privilege(
+            'axsys_bff',
+            format('public.axsys_bff_acl_%s_existing_table', owner),
+            'MAINTAIN'
+          ) as "bffMaintain",
+          has_function_privilege(
+            'anon',
+            format('public.axsys_bff_acl_%s_existing_function()', owner),
+            'EXECUTE'
+          ) as "publicFunction",
+          has_function_privilege(
+            'axsys_bff',
+            format('public.axsys_bff_acl_%s_existing_function()', owner),
+            'EXECUTE'
+          ) as "bffFunction"
+        from unnest(array['postgres', 'supabase_admin']) owner
+        order by owner
+      `
+      expect(
+        preHardeningPrivileges.every(
+          ({ publicMaintain, bffMaintain, publicFunction, bffFunction }) =>
+            publicMaintain && bffMaintain && publicFunction && bffFunction,
+        ),
+      ).toBe(true)
 
       await hardenLocalPublicPrivileges(supabaseAdminUrl.toString())
 
@@ -119,39 +173,96 @@ describe("axsys_bff default ACL hardening", () => {
         from pg_default_acl defaults
         cross join lateral aclexplode(defaults.defaclacl) grant_item
         join pg_roles owner_role on owner_role.oid = defaults.defaclrole
-        join pg_roles grantee_role on grantee_role.oid = grant_item.grantee
+        left join pg_roles grantee_role on grantee_role.oid = grant_item.grantee
         where defaults.defaclnamespace in (0, 'public'::regnamespace)
           and owner_role.rolname in ('postgres', 'supabase_admin')
-          and grantee_role.rolname = 'axsys_bff'
+          and (
+            grant_item.grantee = 0
+            or grantee_role.rolname in (
+              'anon', 'authenticated', 'service_role', 'axsys_bff'
+            )
+          )
           and defaults.defaclobjtype in ('r', 'S', 'f')
       `
 
       const existingPrivileges = await supabaseAdminOwnerSql<
         {
           owner: string
-          tablePrivilege: boolean
+          roleName: string
+          tableSelectPrivilege: boolean
+          tableDangerousPrivilege: boolean
           sequencePrivilege: boolean
+          functionPrivilege: boolean
         }[]
       >`
         select
           owner,
+          role_name as "roleName",
           has_table_privilege(
-            'axsys_bff',
+            role_name,
             format('public.axsys_bff_acl_%s_existing_table', owner),
-            'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
-          ) as "tablePrivilege",
+            'SELECT'
+          ) as "tableSelectPrivilege",
+          has_table_privilege(
+            role_name,
+            format('public.axsys_bff_acl_%s_existing_table', owner),
+            'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN'
+          ) as "tableDangerousPrivilege",
           has_sequence_privilege(
-            'axsys_bff',
+            role_name,
             format('public.axsys_bff_acl_%s_existing_sequence', owner),
             'USAGE,SELECT,UPDATE'
-          ) as "sequencePrivilege"
+          ) as "sequencePrivilege",
+          has_function_privilege(
+            role_name,
+            format('public.axsys_bff_acl_%s_existing_function()', owner),
+            'EXECUTE'
+          ) as "functionPrivilege"
         from unnest(array['postgres', 'supabase_admin']) owner
-        order by owner
+        cross join unnest(
+          array['anon', 'authenticated', 'service_role', 'axsys_bff']
+        ) role_name
+        order by owner, role_name
+      `
+
+      const [remainingPublicOrBffObjectGrants] = await supabaseAdminOwnerSql<
+        [{ count: number }]
+      >`
+        select count(*)::integer as count
+        from pg_class class
+        join pg_namespace namespace on namespace.oid = class.relnamespace
+        cross join lateral aclexplode(class.relacl) grant_item
+        left join pg_roles grantee on grantee.oid = grant_item.grantee
+        where namespace.nspname = 'public'
+          and class.relname in (
+            'axsys_bff_acl_postgres_existing_table',
+            'axsys_bff_acl_postgres_existing_sequence',
+            'axsys_bff_acl_supabase_admin_existing_table',
+            'axsys_bff_acl_supabase_admin_existing_sequence'
+          )
+          and (grant_item.grantee = 0 or grantee.rolname = 'axsys_bff')
+      `
+
+      const [remainingPublicOrBffFunctionGrants] = await supabaseAdminOwnerSql<
+        [{ count: number }]
+      >`
+        select count(*)::integer as count
+        from pg_proc function
+        join pg_namespace namespace on namespace.oid = function.pronamespace
+        cross join lateral aclexplode(function.proacl) grant_item
+        left join pg_roles grantee on grantee.oid = grant_item.grantee
+        where namespace.nspname = 'public'
+          and function.proname in (
+            'axsys_bff_acl_postgres_existing_function',
+            'axsys_bff_acl_supabase_admin_existing_function'
+          )
+          and (grant_item.grantee = 0 or grantee.rolname = 'axsys_bff')
       `
 
       const futurePrivileges = await supabaseAdminOwnerSql<
         {
           owner: string
+          roleName: string
           tablePrivilege: boolean
           sequencePrivilege: boolean
           functionPrivilege: boolean
@@ -159,23 +270,27 @@ describe("axsys_bff default ACL hardening", () => {
       >`
         select
           owner,
+          role_name as "roleName",
           has_table_privilege(
-            'axsys_bff',
+            role_name,
             format('public.axsys_bff_acl_%s_table', owner),
-            'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+            'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN'
           ) as "tablePrivilege",
           has_sequence_privilege(
-            'axsys_bff',
+            role_name,
             format('public.axsys_bff_acl_%s_sequence', owner),
             'USAGE,SELECT,UPDATE'
           ) as "sequencePrivilege",
           has_function_privilege(
-            'axsys_bff',
+            role_name,
             format('public.axsys_bff_acl_%s_function()', owner),
             'EXECUTE'
           ) as "functionPrivilege"
         from unnest(array['postgres', 'supabase_admin']) owner
-        order by owner
+        cross join unnest(
+          array['anon', 'authenticated', 'service_role', 'axsys_bff']
+        ) role_name
+        order by owner, role_name
       `
 
       const [explicitPrivileges] = await supabaseAdminOwnerSql<
@@ -194,75 +309,133 @@ describe("axsys_bff default ACL hardening", () => {
           ) as "bffExecute"
       `
 
-      expect({
-        remainingDefaultGrants: remainingDefaults.count,
-        existingPrivileges,
-        futurePrivileges,
-        explicitPrivileges,
-      }).toEqual({
-        remainingDefaultGrants: 0,
-        existingPrivileges: [
-          {
-            owner: "postgres",
-            tablePrivilege: false,
-            sequencePrivilege: false,
-          },
-          {
-            owner: "supabase_admin",
-            tablePrivilege: false,
-            sequencePrivilege: false,
-          },
-        ],
-        futurePrivileges: [
-          {
-            owner: "postgres",
-            tablePrivilege: false,
-            sequencePrivilege: false,
-            functionPrivilege: false,
-          },
-          {
-            owner: "supabase_admin",
-            tablePrivilege: false,
-            sequencePrivilege: false,
-            functionPrivilege: false,
-          },
-        ],
-        explicitPrivileges: {
-          authenticatedSelect: true,
-          bffExecute: true,
-        },
+      expect(remainingDefaults.count).toBe(0)
+      expect(remainingPublicOrBffObjectGrants.count).toBe(0)
+      expect(remainingPublicOrBffFunctionGrants.count).toBe(0)
+      expect(existingPrivileges).toHaveLength(8)
+      expect(
+        existingPrivileges.every(
+          ({
+            roleName,
+            tableSelectPrivilege,
+            tableDangerousPrivilege,
+            sequencePrivilege,
+            functionPrivilege,
+          }) =>
+            tableSelectPrivilege === (roleName === "authenticated") &&
+            !tableDangerousPrivilege &&
+            !sequencePrivilege &&
+            !functionPrivilege,
+        ),
+      ).toBe(true)
+      expect(futurePrivileges).toHaveLength(8)
+      expect(
+        futurePrivileges.every(
+          ({ tablePrivilege, sequencePrivilege, functionPrivilege }) =>
+            !tablePrivilege && !sequencePrivilege && !functionPrivilege,
+        ),
+      ).toBe(true)
+      expect(explicitPrivileges).toEqual({
+        authenticatedSelect: true,
+        bffExecute: true,
       })
     } finally {
-      for (const [owner, ownerSql] of ownerConnections) {
-        await ownerSql.unsafe(`
-          drop function if exists public.axsys_bff_acl_${owner}_function();
-          drop sequence if exists public.axsys_bff_acl_${owner}_sequence;
-          drop table if exists public.axsys_bff_acl_${owner}_table;
-          drop sequence if exists public.axsys_bff_acl_${owner}_existing_sequence;
-          drop table if exists public.axsys_bff_acl_${owner}_existing_table;
+      const cleanupErrors: unknown[] = []
+      const ownerCleanup = await Promise.allSettled(
+        ownerConnections.map(async ([owner, ownerSql]) => {
+          await ownerSql.unsafe(`
+            drop function if exists public.axsys_bff_acl_${owner}_function();
+            drop sequence if exists public.axsys_bff_acl_${owner}_sequence;
+            drop table if exists public.axsys_bff_acl_${owner}_table;
+            drop function if exists public.axsys_bff_acl_${owner}_existing_function();
+            drop sequence if exists public.axsys_bff_acl_${owner}_existing_sequence;
+            drop table if exists public.axsys_bff_acl_${owner}_existing_table;
 
-          alter default privileges for role ${owner}
-            revoke all privileges on tables from axsys_bff;
-          alter default privileges for role ${owner} in schema public
-            revoke all privileges on tables from axsys_bff;
-          alter default privileges for role ${owner}
-            revoke all privileges on sequences from axsys_bff;
-          alter default privileges for role ${owner} in schema public
-            revoke all privileges on sequences from axsys_bff;
-          alter default privileges for role ${owner}
-            revoke all privileges on functions from axsys_bff;
-          alter default privileges for role ${owner} in schema public
-            revoke all privileges on functions from axsys_bff;
-        `)
+            alter default privileges for role ${owner}
+              revoke all privileges on tables
+              from public, anon, authenticated, service_role, axsys_bff;
+            alter default privileges for role ${owner} in schema public
+              revoke all privileges on tables
+              from public, anon, authenticated, service_role, axsys_bff;
+            alter default privileges for role ${owner}
+              revoke all privileges on sequences
+              from public, anon, authenticated, service_role, axsys_bff;
+            alter default privileges for role ${owner} in schema public
+              revoke all privileges on sequences
+              from public, anon, authenticated, service_role, axsys_bff;
+            alter default privileges for role ${owner}
+              revoke all privileges on functions
+              from public, anon, authenticated, service_role, axsys_bff;
+            alter default privileges for role ${owner} in schema public
+              revoke all privileges on functions
+              from public, anon, authenticated, service_role, axsys_bff;
+          `)
+        }),
+      )
+      for (const result of ownerCleanup) {
+        if (result.status === "rejected") cleanupErrors.push(result.reason)
       }
 
-      await supabaseAdminOwnerSql.unsafe(`
-        drop function if exists private.axsys_bff_acl_private_probe();
-        drop table if exists public.axsys_bff_acl_authenticated_probe;
-      `)
-      if (createdPrivateSchema) {
-        await supabaseAdminOwnerSql`drop schema if exists private`
+      try {
+        await supabaseAdminOwnerSql.unsafe(`
+          drop function if exists private.axsys_bff_acl_private_probe();
+          drop table if exists public.axsys_bff_acl_authenticated_probe;
+        `)
+        if (createdPrivateSchema) {
+          await supabaseAdminOwnerSql`drop schema if exists private`
+        }
+      } catch (error) {
+        cleanupErrors.push(error)
+      }
+
+      try {
+        const [residue] = await supabaseAdminOwnerSql<
+          [{ objectCount: number; defaultGrantCount: number }]
+        >`
+          select
+            (
+              select count(*)::integer
+              from (
+                select class.relname
+                from pg_class class
+                join pg_namespace namespace on namespace.oid = class.relnamespace
+                where namespace.nspname = 'public'
+                  and class.relname like 'axsys_bff_acl_%'
+                union all
+                select function.proname
+                from pg_proc function
+                join pg_namespace namespace on namespace.oid = function.pronamespace
+                where namespace.nspname in ('public', 'private')
+                  and function.proname like 'axsys_bff_acl_%'
+              ) objects
+            )::integer as "objectCount",
+            (
+              select count(*)::integer
+              from pg_default_acl defaults
+              cross join lateral aclexplode(defaults.defaclacl) grant_item
+              join pg_roles owner_role on owner_role.oid = defaults.defaclrole
+              left join pg_roles grantee_role on grantee_role.oid = grant_item.grantee
+              where defaults.defaclnamespace in (0, 'public'::regnamespace)
+                and owner_role.rolname in ('postgres', 'supabase_admin')
+                and defaults.defaclobjtype in ('r', 'S', 'f')
+                and (
+                  grant_item.grantee = 0
+                  or grantee_role.rolname in (
+                    'anon', 'authenticated', 'service_role', 'axsys_bff'
+                  )
+                )
+            )::integer as "defaultGrantCount"
+        `
+        if (residue.objectCount !== 0 || residue.defaultGrantCount !== 0) {
+          cleanupErrors.push(new Error("Default ACL integration cleanup left residue"))
+        }
+      } catch (error) {
+        cleanupErrors.push(error)
+      }
+
+      if (cleanupErrors.length > 0) {
+        throw new AggregateError(cleanupErrors, "Default ACL integration cleanup failed")
       }
     }
-  })
+  }, 20_000)
 })

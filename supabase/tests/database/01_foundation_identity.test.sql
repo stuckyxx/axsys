@@ -184,6 +184,7 @@ select results_eq(
       and class.relname in ('profiles','platform_roles','companies','company_memberships','member_modules')
     order by class.relname, trigger.tgname$$,
   $$values
+    ('companies','companies_serialize_auth_scope','serialize_identity_invariants','O'),
     ('companies','companies_touch_version','touch_version','O'),
     ('company_memberships','company_memberships_serialize_identity_invariants','serialize_identity_invariants','O'),
     ('company_memberships','membership_identity_exclusivity','enforce_identity_exclusivity','O'),
@@ -191,6 +192,7 @@ select results_eq(
     ('company_memberships','protect_last_company_admin','protect_last_company_admin','O'),
     ('platform_roles','platform_role_identity_exclusivity','enforce_identity_exclusivity','O'),
     ('platform_roles','platform_roles_serialize_identity_invariants','serialize_identity_invariants','O'),
+    ('profiles','profiles_serialize_auth_scope','serialize_identity_invariants','O'),
     ('profiles','profiles_touch_version','touch_version','O')$$,
   'triggers essenciais estão habilitados e ligados à função correta'
 );
@@ -202,16 +204,22 @@ select results_eq(
     from pg_trigger trigger
     join pg_class class on class.oid = trigger.tgrelid
     where trigger.tgname in (
+        'companies_serialize_auth_scope',
         'company_memberships_serialize_identity_invariants',
-        'platform_roles_serialize_identity_invariants'
+        'platform_roles_serialize_identity_invariants',
+        'profiles_serialize_auth_scope'
       )
       and not trigger.tgisinternal
     order by class.relname, trigger.tgname$$,
   $$values
+    ('companies','companies_serialize_auth_scope',18,
+     'CREATE TRIGGER companies_serialize_auth_scope BEFORE UPDATE OF status ON public.companies FOR EACH STATEMENT EXECUTE FUNCTION private.serialize_identity_invariants()'),
     ('company_memberships','company_memberships_serialize_identity_invariants',30,
      'CREATE TRIGGER company_memberships_serialize_identity_invariants BEFORE INSERT OR DELETE OR UPDATE OF user_id, company_id, role, status ON public.company_memberships FOR EACH STATEMENT EXECUTE FUNCTION private.serialize_identity_invariants()'),
-    ('platform_roles','platform_roles_serialize_identity_invariants',22,
-     'CREATE TRIGGER platform_roles_serialize_identity_invariants BEFORE INSERT OR UPDATE OF user_id ON public.platform_roles FOR EACH STATEMENT EXECUTE FUNCTION private.serialize_identity_invariants()')$$,
+    ('platform_roles','platform_roles_serialize_identity_invariants',30,
+     'CREATE TRIGGER platform_roles_serialize_identity_invariants BEFORE INSERT OR DELETE OR UPDATE OF user_id, is_active ON public.platform_roles FOR EACH STATEMENT EXECUTE FUNCTION private.serialize_identity_invariants()'),
+    ('profiles','profiles_serialize_auth_scope',18,
+     'CREATE TRIGGER profiles_serialize_auth_scope BEFORE UPDATE OF must_change_password, temporary_password_expires_at, is_active ON public.profiles FOR EACH STATEMENT EXECUTE FUNCTION private.serialize_identity_invariants()')$$,
   'serialização global cobre exatamente os eventos statement-level contratados'
 );
 select is(
@@ -236,6 +244,12 @@ select results_eq(
     join pg_roles owner on owner.oid = function.proowner
     join pg_language language on language.oid = function.prolang
     where namespace.nspname = 'private'
+      and function.proname in (
+        'enforce_identity_exclusivity',
+        'protect_last_company_admin',
+        'serialize_identity_invariants',
+        'touch_version'
+      )
     order by function.proname$$,
   $$values
     ('enforce_identity_exclusivity','postgres','plpgsql','f',false),
@@ -249,6 +263,12 @@ select is_empty(
     from pg_proc function
     join pg_namespace namespace on namespace.oid = function.pronamespace
     where namespace.nspname = 'private'
+      and function.proname in (
+        'enforce_identity_exclusivity',
+        'protect_last_company_admin',
+        'serialize_identity_invariants',
+        'touch_version'
+      )
       and not ('search_path=""' = any(coalesce(function.proconfig, '{}'::text[])))$$,
   'funções privadas fixam search_path vazio'
 );
@@ -396,6 +416,12 @@ select is_empty(
     ) grant_item
     left join pg_roles grantee on grantee.oid = grant_item.grantee
     where namespace.nspname = 'private'
+      and proc.proname in (
+        'enforce_identity_exclusivity',
+        'protect_last_company_admin',
+        'serialize_identity_invariants',
+        'touch_version'
+      )
       and (
         grant_item.grantee = 0
         or grantee.rolname in ('anon','authenticated','service_role','axsys_bff')

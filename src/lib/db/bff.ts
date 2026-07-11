@@ -65,7 +65,10 @@ export const bffDb = {
     return row
   },
 
-  async clearRateLimit(bucket: string, keyHash: string): Promise<void> {
+  async clearRateLimit(
+    bucket: "login-account-failure" | "reauth-account-failure",
+    keyHash: string,
+  ): Promise<void> {
     const sql = await getSql()
     await sql`select private.clear_rate_limit(${bucket}, ${keyHash})`
   },
@@ -76,14 +79,14 @@ export const bffDb = {
     rememberMe: boolean,
   ): Promise<string> {
     const sql = await getSql()
-    const [row] = await sql<[{ expiresAt: string }]>`
+    const [row] = await sql<[{ expiresAt: Date }]>`
       select private.register_auth_session(
         ${sessionId}::uuid,
         ${userId}::uuid,
         ${rememberMe}
       ) as "expiresAt"
     `
-    return row.expiresAt
+    return row.expiresAt.toISOString()
   },
 
   async assertAuthSession(sessionId: string, userId: string): Promise<boolean> {
@@ -95,5 +98,113 @@ export const bffDb = {
       ) as active
     `
     return row.active
+  },
+
+  async writeAuthenticatedAuditEvent(input: {
+    actorUserId: string
+    sessionId: string
+    action: string
+    resourceType: string
+    resourceId: string | null
+    outcome: "success" | "denied" | "failure"
+    reasonCode: string | null
+    correlationId: string
+    ipHash: string | null
+    userAgentHash: string | null
+    metadata: Record<string, unknown>
+  }): Promise<void> {
+    const sql = await getSql()
+    await sql`
+      select private.write_authenticated_audit_event(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.action},
+        ${input.resourceType},
+        ${input.resourceId}::uuid,
+        ${input.outcome},
+        ${input.reasonCode},
+        ${input.correlationId}::uuid,
+        ${input.ipHash},
+        ${input.userAgentHash},
+        ${JSON.stringify(input.metadata)}::jsonb
+      )
+    `
+  },
+
+  async writeSecurityEvent(input: {
+    eventType: string
+    emailHash: string | null
+    ipHash: string | null
+    outcome: "success" | "denied" | "failure"
+    reasonCode: string | null
+    correlationId: string
+    metadata: Record<string, unknown>
+  }): Promise<void> {
+    const sql = await getSql()
+    await sql`
+      select private.write_security_event(
+        ${input.eventType},
+        null::uuid,
+        ${input.emailHash},
+        ${input.ipHash},
+        ${input.outcome},
+        ${input.reasonCode},
+        ${input.correlationId}::uuid,
+        ${JSON.stringify(input.metadata)}::jsonb
+      )
+    `
+  },
+
+  async revokeSessionsAndWriteLogout(input: {
+    actorUserId: string
+    sessionId: string
+    correlationId: string
+    ipHash: string | null
+    userAgentHash: string | null
+  }): Promise<void> {
+    const sql = await getSql()
+    await sql`
+      select private.revoke_sessions_and_write_logout(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.correlationId}::uuid,
+        ${input.ipHash},
+        ${input.userAgentHash}
+      )
+    `
+  },
+
+  async failClosedLoginSession(input: {
+    actorUserId: string
+    sessionId: string
+    reasonCode: string
+    correlationId: string
+  }): Promise<void> {
+    const sql = await getSql()
+    await sql`
+      select private.fail_closed_login_session(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.reasonCode},
+        ${input.correlationId}::uuid
+      )
+    `
+  },
+
+  async rotateAppSessionAfterReauthentication(input: {
+    actorUserId: string
+    oldSessionId: string
+    newSessionId: string
+    correlationId: string
+  }): Promise<void> {
+    const sql = await getSql()
+    await sql`
+      select private.rotate_app_session_after_reauthentication(
+        ${input.actorUserId}::uuid,
+        ${input.oldSessionId}::uuid,
+        ${input.newSessionId}::uuid,
+        ${input.correlationId}::uuid
+      )
+    `
   },
 }

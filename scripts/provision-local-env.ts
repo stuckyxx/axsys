@@ -71,6 +71,15 @@ const PUBLIC_PRIVILEGE_HARDENING_SQL = `
 revoke all privileges on all tables in schema public from public;
 revoke all privileges on all sequences in schema public from public;
 revoke all privileges on all functions in schema public from public;
+revoke all privileges on all tables in schema public
+  from anon, service_role;
+revoke insert, update, delete, truncate, references, trigger, maintain
+  on all tables in schema public
+  from authenticated;
+revoke all privileges on all sequences in schema public
+  from anon, authenticated, service_role;
+revoke all privileges on all functions in schema public
+  from anon, authenticated, service_role;
 revoke all privileges on all tables in schema public from axsys_bff;
 revoke all privileges on all sequences in schema public from axsys_bff;
 revoke all privileges on all functions in schema public from axsys_bff;
@@ -80,9 +89,20 @@ begin
   if exists (select 1 from pg_namespace where nspname = 'private') then
     revoke all privileges on all functions in schema private
       from public;
+    if to_regtype('private.auth_session_state') is not null then
+      revoke all privileges on type private.auth_session_state
+        from public, anon, authenticated, service_role, axsys_bff;
+    end if;
   end if;
 end
 $$;
+
+alter default privileges for role postgres
+  revoke usage on types
+  from public, anon, authenticated, service_role, axsys_bff;
+alter default privileges for role supabase_admin
+  revoke usage on types
+  from public, anon, authenticated, service_role, axsys_bff;
 
 alter default privileges for role postgres in schema public
   revoke all privileges on tables from anon, authenticated, service_role, axsys_bff;
@@ -145,7 +165,7 @@ begin
     where defaults.defaclnamespace in (0, 'public'::regnamespace)
       and owner_role.rolname in ('postgres', 'supabase_admin')
       and grantee_role.rolname in ('anon', 'authenticated', 'service_role', 'axsys_bff')
-      and defaults.defaclobjtype in ('r', 'S', 'f')
+      and defaults.defaclobjtype in ('r', 'S', 'f', 'T')
   ) then
     raise exception 'public default ACL assertion failed: unexpected API role grant';
   end if;
@@ -157,7 +177,7 @@ begin
     join pg_roles owner_role on owner_role.oid = defaults.defaclrole
     where defaults.defaclnamespace in (0, 'public'::regnamespace)
       and owner_role.rolname in ('postgres', 'supabase_admin')
-      and defaults.defaclobjtype in ('r', 'S', 'f')
+      and defaults.defaclobjtype in ('r', 'S', 'f', 'T')
       and grant_item.grantee = 0
   ) then
     raise exception 'public default ACL assertion failed: unexpected PUBLIC object grant';
@@ -177,6 +197,26 @@ begin
       )
   ) then
     raise exception 'global default ACL assertion failed: PUBLIC function grant remains';
+  end if;
+
+  if 2 <> (
+    select count(*)
+    from pg_default_acl defaults
+    join pg_roles owner_role on owner_role.oid = defaults.defaclrole
+    where defaults.defaclnamespace = 0
+      and owner_role.rolname in ('postgres', 'supabase_admin')
+      and defaults.defaclobjtype = 'T'
+      and not exists (
+        select 1
+        from aclexplode(defaults.defaclacl) grant_item
+        left join pg_roles grantee_role on grantee_role.oid = grant_item.grantee
+        where grant_item.grantee = 0
+           or grantee_role.rolname in (
+             'anon', 'authenticated', 'service_role', 'axsys_bff'
+           )
+      )
+  ) then
+    raise exception 'global type default ACL assertion failed';
   end if;
 end
 $$;

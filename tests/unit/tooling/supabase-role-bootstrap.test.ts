@@ -115,10 +115,10 @@ describe("Supabase custom role bootstrap", () => {
       /grantee_role\.rolname in \('anon', 'authenticated', 'service_role', 'axsys_bff'\)/u,
     )
     expect(rolesSource).toMatch(
-      /defaults\.defaclnamespace in \(0, 'public'::regnamespace\)[\s\S]*?defaults\.defaclobjtype in \('r', 'S', 'f'\)[\s\S]*?grant_item\.grantee = 0/u,
+      /defaults\.defaclnamespace in \(0, 'public'::regnamespace\)[\s\S]*?defaults\.defaclobjtype in \('r', 'S', 'f', 'T'\)[\s\S]*?grant_item\.grantee = 0/u,
     )
     expect(provisionerSource).toMatch(
-      /defaults\.defaclnamespace in \(0, 'public'::regnamespace\)[\s\S]*?defaults\.defaclobjtype in \('r', 'S', 'f'\)[\s\S]*?grant_item\.grantee = 0/u,
+      /defaults\.defaclnamespace in \(0, 'public'::regnamespace\)[\s\S]*?defaults\.defaclobjtype in \('r', 'S', 'f', 'T'\)[\s\S]*?grant_item\.grantee = 0/u,
     )
     expect(provisionerSource).toContain("from pg_default_acl")
     expect(provisionerSource).toContain("aclexplode")
@@ -130,8 +130,19 @@ describe("Supabase custom role bootstrap", () => {
       expect(repeatableHardeningSql).toContain(
         `revoke all privileges on all ${objectType} in schema public from public;`,
       )
-      expect(repeatableHardeningSql).not.toContain(
-        `revoke all privileges on all ${objectType} in schema public from anon, authenticated, service_role;`,
+    }
+    expect(repeatableHardeningSql).toContain(
+      "revoke all privileges on all tables in schema public\n  from anon, service_role;",
+    )
+    expect(repeatableHardeningSql).toContain(
+      "revoke insert, update, delete, truncate, references, trigger, maintain\n  on all tables in schema public\n  from authenticated;",
+    )
+    expect(repeatableHardeningSql).not.toContain(
+      "revoke all privileges on all tables in schema public from anon, authenticated, service_role;",
+    )
+    for (const objectType of ["sequences", "functions"] as const) {
+      expect(repeatableHardeningSql).toContain(
+        `revoke all privileges on all ${objectType} in schema public\n  from anon, authenticated, service_role;`,
       )
     }
     expect(repeatableHardeningSql).toContain(
@@ -156,6 +167,24 @@ describe("Supabase custom role bootstrap", () => {
     ] as const) {
       expect(privateFunctionRevoke).not.toContain(namedRole)
     }
+    expect(repeatableHardeningSql).toContain(
+      "alter default privileges for role postgres\n  revoke usage on types\n  from public, anon, authenticated, service_role, axsys_bff;",
+    )
+    expect(repeatableHardeningSql).toContain(
+      "alter default privileges for role supabase_admin\n  revoke usage on types\n  from public, anon, authenticated, service_role, axsys_bff;",
+    )
+    expect(repeatableHardeningSql).toContain(
+      "revoke all privileges on type private.auth_session_state\n        from public, anon, authenticated, service_role, axsys_bff;",
+    )
+    expect(provisionerSource).toContain(
+      "global type default ACL assertion failed",
+    )
+    expect(rolesSource).toContain(
+      "alter default privileges for role postgres\n  revoke usage on types from anon, authenticated, service_role, axsys_bff;",
+    )
+    expect(rolesSource).toContain(
+      "alter default privileges for role postgres\n  revoke usage on types from public;",
+    )
   })
 
   it("rejects reverse axsys_bff grants to any non-administrative member", () => {

@@ -44,6 +44,8 @@ alter default privileges for role postgres
   revoke all privileges on sequences from anon, authenticated, service_role, axsys_bff;
 alter default privileges for role postgres
   revoke all privileges on functions from anon, authenticated, service_role, axsys_bff;
+alter default privileges for role postgres
+  revoke usage on types from anon, authenticated, service_role, axsys_bff;
 alter default privileges for role postgres in schema public
   revoke all privileges on tables from public;
 alter default privileges for role postgres in schema public
@@ -56,6 +58,8 @@ alter default privileges for role postgres
   revoke all privileges on sequences from public;
 alter default privileges for role postgres
   revoke all privileges on functions from public;
+alter default privileges for role postgres
+  revoke usage on types from public;
 reset role;
 
 revoke all privileges on database postgres from axsys_bff;
@@ -121,7 +125,7 @@ begin
     where defaults.defaclnamespace in (0, 'public'::regnamespace)
       and owner_role.rolname = 'postgres'
       and grantee_role.rolname in ('anon', 'authenticated', 'service_role', 'axsys_bff')
-      and defaults.defaclobjtype in ('r', 'S', 'f')
+      and defaults.defaclobjtype in ('r', 'S', 'f', 'T')
   ) then
     raise exception 'public default ACL assertion failed: unexpected API role grant';
   end if;
@@ -133,7 +137,7 @@ begin
     join pg_roles owner_role on owner_role.oid = defaults.defaclrole
     where defaults.defaclnamespace in (0, 'public'::regnamespace)
       and owner_role.rolname = 'postgres'
-      and defaults.defaclobjtype in ('r', 'S', 'f')
+      and defaults.defaclobjtype in ('r', 'S', 'f', 'T')
       and grant_item.grantee = 0
   ) then
     raise exception 'public default ACL assertion failed: unexpected PUBLIC object grant';
@@ -153,6 +157,26 @@ begin
       )
   ) then
     raise exception 'global default ACL assertion failed: PUBLIC function grant remains';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_default_acl defaults
+    join pg_roles owner_role on owner_role.oid = defaults.defaclrole
+    where defaults.defaclnamespace = 0
+      and owner_role.rolname = 'postgres'
+      and defaults.defaclobjtype = 'T'
+      and not exists (
+        select 1
+        from aclexplode(defaults.defaclacl) grant_item
+        left join pg_roles grantee_role on grantee_role.oid = grant_item.grantee
+        where grant_item.grantee = 0
+           or grantee_role.rolname in (
+             'anon', 'authenticated', 'service_role', 'axsys_bff'
+           )
+      )
+  ) then
+    raise exception 'global type default ACL assertion failed';
   end if;
 
   if has_schema_privilege('axsys_bff', 'public', 'USAGE')

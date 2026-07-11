@@ -9,6 +9,72 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      audit_events: {
+        Row: {
+          action: string
+          actor_user_id: string
+          company_id: string | null
+          correlation_id: string
+          id: string
+          ip_hash: string | null
+          metadata: Json
+          occurred_at: string
+          outcome: Database["public"]["Enums"]["audit_outcome"]
+          reason_code: string | null
+          resource_id: string | null
+          resource_type: string
+          scope: Database["public"]["Enums"]["audit_scope"]
+          user_agent_hash: string | null
+        }
+        Insert: {
+          action: string
+          actor_user_id: string
+          company_id?: string | null
+          correlation_id: string
+          id?: string
+          ip_hash?: string | null
+          metadata?: Json
+          occurred_at?: string
+          outcome: Database["public"]["Enums"]["audit_outcome"]
+          reason_code?: string | null
+          resource_id?: string | null
+          resource_type: string
+          scope: Database["public"]["Enums"]["audit_scope"]
+          user_agent_hash?: string | null
+        }
+        Update: {
+          action?: string
+          actor_user_id?: string
+          company_id?: string | null
+          correlation_id?: string
+          id?: string
+          ip_hash?: string | null
+          metadata?: Json
+          occurred_at?: string
+          outcome?: Database["public"]["Enums"]["audit_outcome"]
+          reason_code?: string | null
+          resource_id?: string | null
+          resource_type?: string
+          scope?: Database["public"]["Enums"]["audit_scope"]
+          user_agent_hash?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "audit_events_actor_user_id_fkey"
+            columns: ["actor_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "audit_events_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       companies: {
         Row: {
           archived_at: string | null
@@ -139,6 +205,69 @@ export type Database = {
           },
         ]
       }
+      idempotency_keys: {
+        Row: {
+          actor_user_id: string
+          company_id: string | null
+          completed_at: string | null
+          created_at: string
+          expires_at: string
+          id: string
+          key_hash: string
+          operation: string
+          request_hash: string
+          response_body: Json | null
+          response_status: number | null
+          state: Database["public"]["Enums"]["idempotency_state"]
+          updated_at: string
+        }
+        Insert: {
+          actor_user_id: string
+          company_id?: string | null
+          completed_at?: string | null
+          created_at?: string
+          expires_at: string
+          id?: string
+          key_hash: string
+          operation: string
+          request_hash: string
+          response_body?: Json | null
+          response_status?: number | null
+          state?: Database["public"]["Enums"]["idempotency_state"]
+          updated_at?: string
+        }
+        Update: {
+          actor_user_id?: string
+          company_id?: string | null
+          completed_at?: string | null
+          created_at?: string
+          expires_at?: string
+          id?: string
+          key_hash?: string
+          operation?: string
+          request_hash?: string
+          response_body?: Json | null
+          response_status?: number | null
+          state?: Database["public"]["Enums"]["idempotency_state"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "idempotency_keys_actor_user_id_fkey"
+            columns: ["actor_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "idempotency_keys_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       member_modules: {
         Row: {
           company_id: string
@@ -259,6 +388,53 @@ export type Database = {
         }
         Relationships: []
       }
+      security_events: {
+        Row: {
+          correlation_id: string
+          email_hash: string | null
+          event_type: string
+          id: string
+          ip_hash: string | null
+          metadata: Json
+          occurred_at: string
+          outcome: Database["public"]["Enums"]["audit_outcome"]
+          reason_code: string | null
+          user_id: string | null
+        }
+        Insert: {
+          correlation_id: string
+          email_hash?: string | null
+          event_type: string
+          id?: string
+          ip_hash?: string | null
+          metadata?: Json
+          occurred_at?: string
+          outcome: Database["public"]["Enums"]["audit_outcome"]
+          reason_code?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          correlation_id?: string
+          email_hash?: string | null
+          event_type?: string
+          id?: string
+          ip_hash?: string | null
+          metadata?: Json
+          occurred_at?: string
+          outcome?: Database["public"]["Enums"]["audit_outcome"]
+          reason_code?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "security_events_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -267,7 +443,10 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
+      audit_outcome: "success" | "denied" | "failure"
+      audit_scope: "platform" | "tenant"
       company_status: "active" | "archived"
+      idempotency_state: "processing" | "completed" | "failed"
       membership_role: "company_admin" | "member"
       membership_status: "active" | "suspended"
       module_key: "administrative" | "financial" | "certificates"
@@ -400,7 +579,10 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      audit_outcome: ["success", "denied", "failure"],
+      audit_scope: ["platform", "tenant"],
       company_status: ["active", "archived"],
+      idempotency_state: ["processing", "completed", "failed"],
       membership_role: ["company_admin", "member"],
       membership_status: ["active", "suspended"],
       module_key: ["administrative", "financial", "certificates"],
