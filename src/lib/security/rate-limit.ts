@@ -1,12 +1,11 @@
 import "server-only"
 
-import { isIP } from "node:net"
-
 import {
   bffDb,
   type RateLimitDecision as BffRateLimitDecision,
 } from "@/lib/db/bff"
 import { getServerEnv } from "@/lib/env/server"
+import { canonicalizeIp } from "@/lib/security/canonical-ip"
 import { hashSensitive } from "@/lib/security/redact"
 
 export type RateLimitBucket =
@@ -71,7 +70,6 @@ export const UNTRUSTED_CLIENT_IP = "local-or-untrusted-proxy"
 
 const MAX_FORWARDED_HEADER_LENGTH = 1_024
 const MAX_FORWARDED_HOPS = 8
-const MAX_FORWARDED_HOP_LENGTH = 64
 const BASE_DELAY_MILLISECONDS = 250
 const MAX_DELAY_EXPONENT = 4
 
@@ -111,34 +109,6 @@ export async function clearAccountFailureRateLimit(
     throw new Error("Invalid rate limit clear bucket")
   }
   await bffDb.clearRateLimit(bucket, hashSensitive(rawKey))
-}
-
-function canonicalizeIp(value: string): string | null {
-  if (value.length === 0 || value.length > MAX_FORWARDED_HOP_LENGTH) return null
-
-  const version = isIP(value)
-  if (version === 4) {
-    return value
-      .split(".")
-      .map((octet) => String(Number(octet)))
-      .join(".")
-  }
-  if (version !== 6) return null
-
-  try {
-    const hostname = new URL(`http://[${value}]/`).hostname
-    const normalized = hostname.slice(1, -1).toLowerCase()
-    const mapped = normalized.match(
-      /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u,
-    )
-    if (!mapped) return normalized
-
-    const high = Number.parseInt(mapped[1], 16)
-    const low = Number.parseInt(mapped[2], 16)
-    return [high >>> 8, high & 0xff, low >>> 8, low & 0xff].join(".")
-  } catch {
-    return null
-  }
 }
 
 function parseTrustedForwardingChain(value: string | null): string | null {

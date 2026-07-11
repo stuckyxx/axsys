@@ -15,6 +15,8 @@ export function AxsysLogo({
   preload = false,
   className,
 }: AxsysLogoProps) {
+  const compact = variant === "compact"
+
   return (
     <span
       aria-label="Axsys"
@@ -25,19 +27,20 @@ export function AxsysLogo({
     >
       <Image
         alt=""
-        className="h-8 w-auto"
-        height={32}
+        className={compact ? "size-8" : "h-auto w-[132px]"}
+        height={compact ? 1254 : 809}
         preload={preload}
+        sizes={compact ? "32px" : "132px"}
         src={
           monochrome
-            ? variant === "compact"
+            ? compact
               ? "/brand/axsys-mark-monochrome.png"
               : "/brand/axsys-monochrome.png"
-            : variant === "compact"
+            : compact
               ? "/brand/axsys-mark.png"
               : "/brand/axsys-wordmark.png"
         }
-        width={variant === "compact" ? 32 : 132}
+        width={compact ? 1254 : 1942}
       />
     </span>
   )

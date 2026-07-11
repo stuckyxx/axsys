@@ -31,5 +31,6 @@ export default defineConfig({
     reuseExistingServer,
     gracefulShutdown: { signal: "SIGTERM", timeout: 5_000 },
     timeout: 120_000,
+    env: { APP_ORIGIN: baseURL, TRUST_PROXY: "true" },
   },
 })

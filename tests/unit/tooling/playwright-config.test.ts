@@ -6,6 +6,7 @@ type PlaywrightConfigShape = {
   use?: { baseURL?: string }
   webServer?: {
     command?: string
+    env?: Record<string, string>
     gracefulShutdown?: { signal: string; timeout: number }
     reuseExistingServer?: boolean
     url?: string
@@ -37,6 +38,7 @@ describe("Playwright server isolation", () => {
     expect(config.use?.baseURL).toBe("http://127.0.0.1:3100")
     expect(config.webServer).toMatchObject({
       command: "npm run dev -- --hostname 127.0.0.1 --port 3100",
+      env: { APP_ORIGIN: "http://127.0.0.1:3100" },
       gracefulShutdown: { signal: "SIGTERM", timeout: 5_000 },
       reuseExistingServer: false,
       url: "http://127.0.0.1:3100/favicon.ico",
@@ -53,6 +55,7 @@ describe("Playwright server isolation", () => {
     expect(config.use?.baseURL).toBe("http://127.0.0.1:3201")
     expect(config.webServer).toMatchObject({
       command: "npm run dev -- --hostname 127.0.0.1 --port 3201",
+      env: { APP_ORIGIN: "http://127.0.0.1:3201" },
       reuseExistingServer: true,
       url: "http://127.0.0.1:3201/favicon.ico",
     })
