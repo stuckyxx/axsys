@@ -23,6 +23,7 @@ export type AuthorizedDownloadDependencies = Readonly<{
       sessionId: string
       fileId: string
       correlationId: string
+      signal: AbortSignal
     }): Promise<ImageDownloadAuthorization>
     completeDownloadAudit(input: {
       attemptId: string
@@ -47,6 +48,7 @@ const NONCE = /^[A-Za-z0-9_-]{43}$/u
 const MAX_IMAGE_FILE_BYTES = 5 * 1024 * 1024
 const STORAGE_OPEN_TIMEOUT_MS = 15_000
 const AUDIT_WRITE_TIMEOUT_MS = 10_000
+const AUTHORIZATION_TIMEOUT_MS = 10_000
 const IMAGE_PURPOSES = new Set<EnabledImagePurpose>([
   "profile_avatar",
   "company_letterhead",
@@ -127,14 +129,21 @@ export async function createAuthorizedDownload(
   }
 
   let authorization: ImageDownloadAuthorization
+  const authorizationAbort = new AbortController()
   try {
-    authorization = await deps.repository.authorizeImageDownload({
-      actorUserId: input.context.userId,
-      sessionId: input.context.sessionId,
-      fileId: input.fileId,
-      correlationId: input.correlationId,
-    })
+    authorization = await withTimeout(
+      deps.repository.authorizeImageDownload({
+        actorUserId: input.context.userId,
+        sessionId: input.context.sessionId,
+        fileId: input.fileId,
+        correlationId: input.correlationId,
+        signal: authorizationAbort.signal,
+      }),
+      AUTHORIZATION_TIMEOUT_MS,
+      () => authorizationAbort.abort(),
+    )
   } catch {
+    authorizationAbort.abort()
     throw notFound()
   }
   if (!hasValidAuthorization(authorization, input.context, input.fileId)) {

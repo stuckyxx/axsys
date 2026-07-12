@@ -105,6 +105,22 @@ function toSafeInteger(value: number | string): number {
   return parsed
 }
 
+type CancellableQuery<T> = PromiseLike<T> & { cancel(): void }
+
+async function executeCancellableQuery<T>(
+  pending: CancellableQuery<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  const cancel = () => pending.cancel()
+  signal.addEventListener("abort", cancel, { once: true })
+  if (signal.aborted) cancel()
+  try {
+    return await pending
+  } finally {
+    signal.removeEventListener("abort", cancel)
+  }
+}
+
 export type RateLimitDecision = {
   allowed: boolean
   attempts: number
@@ -717,9 +733,12 @@ export const bffDb = {
     sessionId: string
     fileId: string
     correlationId: string
+    signal: AbortSignal
   }): Promise<ImageDownloadAuthorization> {
+    if (input.signal.aborted) throw new Error(BFF_DATABASE_FAILURE)
     const sql = await getSql()
-    const [row] = await sql<
+    if (input.signal.aborted) throw new Error(BFF_DATABASE_FAILURE)
+    const query = sql<
       [(Omit<ImageDownloadAuthorization, "byteSize"> & {
         byteSize: number | string
       })]
@@ -743,6 +762,7 @@ export const bffDb = {
         ${input.correlationId}::uuid
       )
     `
+    const [row] = await executeCancellableQuery(query, input.signal)
     if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
     return { ...row, byteSize: toSafeInteger(row.byteSize) }
   },
@@ -756,6 +776,7 @@ export const bffDb = {
   }): Promise<void> {
     if (input.signal.aborted) throw new Error(BFF_DATABASE_FAILURE)
     const sql = await getSql()
+    if (input.signal.aborted) throw new Error(BFF_DATABASE_FAILURE)
     const query = sql`
       select private.complete_download_audit(
         ${input.attemptId}::uuid,
@@ -764,13 +785,7 @@ export const bffDb = {
         ${input.byteClass}
       )
     `
-    const cancel = () => query.cancel()
-    input.signal.addEventListener("abort", cancel, { once: true })
-    try {
-      await query
-    } finally {
-      input.signal.removeEventListener("abort", cancel)
-    }
+    await executeCancellableQuery(query, input.signal)
   },
 
   async listCompanyUserDirectory(input: {

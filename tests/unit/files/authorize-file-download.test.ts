@@ -79,6 +79,7 @@ describe("authorized file download", () => {
       sessionId,
       fileId,
       correlationId: expect.any(String),
+      signal: expect.any(AbortSignal),
     })
     expect(deps.storage.downloadPrivate).toHaveBeenCalledWith(
       `${companyId}/profile_avatar/${fileId}.webp`,
