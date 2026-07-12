@@ -1,6 +1,6 @@
 import { EnvelopeSimpleIcon, ShieldCheckIcon, UserIcon } from "@phosphor-icons/react/dist/ssr"
 import Link from "next/link"
-import { redirect } from "next/navigation"
+import { forbidden } from "next/navigation"
 
 import { bffDb } from "@/lib/db/bff"
 import { requireCompanyContext } from "@/modules/auth/server/guards"
@@ -27,7 +27,7 @@ export default async function CompanyUsersPage({
   searchParams: Promise<{ cursor?: string | string[]; q?: string | string[] }>
 }) {
   const context = await requireCompanyContext()
-  if (context.role !== "company_admin") redirect("/app/dashboard")
+  if (context.role !== "company_admin") forbidden()
 
   const rawSearch = await searchParams
   const rawQuery = typeof rawSearch.q === "string" ? rawSearch.q.trim() : ""

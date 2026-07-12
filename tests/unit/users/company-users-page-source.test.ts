@@ -14,6 +14,8 @@ describe("company users page security boundaries", () => {
 
     expect(source).toContain("requireCompanyContext()")
     expect(source).toContain("context.role !== \"company_admin\"")
+    expect(source).toContain("forbidden()")
+    expect(source).not.toContain("redirect(\"/app/dashboard\")")
     expect(source).toContain("bffDb.listCompanyUserDirectory")
     expect(source).toContain("actorUserId: context.userId")
     expect(source).toContain("sessionId: context.sessionId")
