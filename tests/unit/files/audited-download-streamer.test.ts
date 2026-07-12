@@ -67,7 +67,7 @@ describe("audited download streamer", () => {
     })
   })
 
-  it("keeps RFC 5987 filenames valid at Unicode truncation boundaries", () => {
+  it("keeps RFC 5987 filenames valid at Unicode truncation boundaries", async () => {
     const bytes = new Uint8Array()
     const response = createAuditedDownloadResponse({
       source: sourceOf(bytes),
@@ -84,6 +84,7 @@ describe("audited download streamer", () => {
     const extendedValue = disposition.split("filename*=UTF-8''")[1]
     expect(extendedValue).not.toMatch(/['()]/u)
     expect(extendedValue).toContain("%27%28%29%2A")
+    await response.arrayBuffer()
   })
 
   it("audits cancellation once when the client aborts", async () => {
@@ -212,5 +213,58 @@ describe("audited download streamer", () => {
       complete: vi.fn().mockResolvedValue(undefined),
     })
     await expect(healthy.arrayBuffer()).resolves.toEqual(bytes.buffer)
+  })
+
+  it("fails fast instead of accumulating Storage readers at capacity", async () => {
+    const readers: ReadableStreamDefaultReader<Uint8Array>[] = []
+    for (let index = 0; index < 4; index += 1) {
+      const response = createAuditedDownloadResponse({
+        source: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array([1]))
+          },
+        }),
+        expectedBytes: 2,
+        expectedSha256: "0".repeat(64),
+        mimeType: "application/octet-stream",
+        originalName: "lento.bin",
+        complete: vi.fn().mockResolvedValue(undefined),
+      })
+      const reader = response.body!.getReader()
+      readers.push(reader)
+      void reader.read().catch(() => undefined)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    const rejectedAudit = vi.fn().mockResolvedValue(undefined)
+    const rejectedSourceCancel = vi.fn()
+    const rejected = createAuditedDownloadResponse({
+      source: new ReadableStream<Uint8Array>({
+        cancel: rejectedSourceCancel,
+      }),
+      expectedBytes: 1,
+      expectedSha256: "0".repeat(64),
+      mimeType: "application/octet-stream",
+      originalName: "excedente.bin",
+      complete: rejectedAudit,
+    })
+    await expect(rejected.arrayBuffer()).rejects.toThrow("Download unavailable")
+    expect(rejectedSourceCancel).toHaveBeenCalledOnce()
+    expect(rejectedAudit).toHaveBeenCalledWith({
+      outcome: "stream_failed",
+      byteClass: "under_1_mib",
+    })
+
+    await Promise.all(readers.map((reader) => reader.cancel()))
+    const bytes = new Uint8Array([9])
+    const recovered = createAuditedDownloadResponse({
+      source: sourceOf(bytes),
+      expectedBytes: 1,
+      expectedSha256: sha256(bytes),
+      mimeType: "application/octet-stream",
+      originalName: "recuperado.bin",
+      complete: vi.fn().mockResolvedValue(undefined),
+    })
+    await expect(recovered.arrayBuffer()).resolves.toEqual(bytes.buffer)
   })
 })

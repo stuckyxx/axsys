@@ -32,39 +32,19 @@ const DOWNLOAD_ERROR = "Download unavailable"
 const MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024
 const MAX_CONCURRENT_VERIFICATIONS = 4
 const VERIFICATION_SLOT_LEASE_MS = 120_000
-const verificationWaiters: Array<() => void> = []
 let activeVerifications = 0
 
-function acquireVerificationSlot(signal: AbortSignal): Promise<() => void> {
-  return new Promise((resolve, reject) => {
-    let queued = false
-    const onAbort = () => {
-      if (!queued) return
-      const index = verificationWaiters.indexOf(grant)
-      if (index >= 0) verificationWaiters.splice(index, 1)
-      queued = false
-      reject(new Error(DOWNLOAD_ERROR))
-    }
-    const grant = () => {
-      queued = false
-      signal.removeEventListener("abort", onAbort)
-      activeVerifications += 1
-      let released = false
-      resolve(() => {
-        if (released) return
-        released = true
-        activeVerifications -= 1
-        verificationWaiters.shift()?.()
-      })
-    }
-    if (signal.aborted) reject(new Error(DOWNLOAD_ERROR))
-    else if (activeVerifications < MAX_CONCURRENT_VERIFICATIONS) grant()
-    else {
-      queued = true
-      verificationWaiters.push(grant)
-      signal.addEventListener("abort", onAbort, { once: true })
-    }
-  })
+function acquireVerificationSlot(): () => void {
+  if (activeVerifications >= MAX_CONCURRENT_VERIFICATIONS) {
+    throw new Error(DOWNLOAD_ERROR)
+  }
+  activeVerifications += 1
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    activeVerifications -= 1
+  }
 }
 
 export function classifyDownloadBytes(byteSize: number): DownloadByteClass {
@@ -120,7 +100,7 @@ export function createAuditedDownloadResponse(
   let verificationSlotLease: ReturnType<typeof setTimeout> | null = null
   let streamController: ReadableStreamDefaultController<Uint8Array> | null =
     null
-  const verificationAbort = new AbortController()
+  let consumerCancelled = false
 
   function releaseSlot(): void {
     if (verificationSlotLease !== null) {
@@ -138,9 +118,7 @@ export function createAuditedDownloadResponse(
   }
 
   async function spoolAndVerify(): Promise<readonly Uint8Array[]> {
-    releaseVerificationSlot = await acquireVerificationSlot(
-      verificationAbort.signal,
-    )
+    releaseVerificationSlot = acquireVerificationSlot()
     verificationSlotLease = setTimeout(() => {
       verifiedChunks = []
       releaseSlot()
@@ -214,12 +192,17 @@ export function createAuditedDownloadResponse(
         } catch {
           // A stale-attempt sweeper provides the durable fallback.
         }
-        controller.error(new Error(DOWNLOAD_ERROR))
+        try {
+          await reader.cancel()
+        } catch {
+          // Storage cancellation is best-effort after a safe stream failure.
+        }
+        if (!consumerCancelled) controller.error(new Error(DOWNLOAD_ERROR))
       }
     },
 
     async cancel(reason) {
-      verificationAbort.abort()
+      consumerCancelled = true
       const storageCancellation = reader.cancel(reason).catch(() => undefined)
       const auditCompletion = settle("aborted")
       verifiedChunks = []
