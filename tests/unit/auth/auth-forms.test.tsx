@@ -468,47 +468,37 @@ describe("Task 14 public page guards", () => {
     [{ kind: "platform" }, "/platform"],
     [{ kind: "company" }, "/app/dashboard"],
   ])("redirects an existing safe context to %s", async (body, target) => {
-    vi.mocked(fetch).mockResolvedValueOnce(Response.json(body))
-
-    render(<LoginPage />)
-    await waitFor(() => expect(mocks.portalNavigate).toHaveBeenCalledWith(target))
-    expect(fetch).toHaveBeenCalledWith("/api/auth/me", {
-      cache: "no-store",
-      credentials: "same-origin",
-      redirect: "error",
-      signal: expect.any(AbortSignal),
+    mocks.getAccessContext.mockResolvedValueOnce({
+      status: "authenticated",
+      context: body,
     })
+
+    await expect(LoginPage()).rejects.toThrow(`REDIRECT:${target}`)
+    expect(mocks.redirect).toHaveBeenCalledWith(target)
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   it("redirects a provisional-password session without serializing it in Flight", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(
-      Response.json(
-        { error: { code: "PASSWORD_CHANGE_REQUIRED" } },
-        { status: 403 },
-      ),
-    )
+    mocks.getAccessContext.mockResolvedValueOnce({ status: "password_change" })
 
-    render(<LoginPage />)
-    await waitFor(() =>
-      expect(mocks.portalNavigate).toHaveBeenCalledWith("/change-password"),
-    )
+    await expect(LoginPage()).rejects.toThrow("REDIRECT:/change-password")
+    expect(mocks.redirect).toHaveBeenCalledWith("/change-password")
   })
 
   it("renders login and does not redirect an anonymous or malformed response", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(
-      Response.json({ error: { code: "AUTH_REQUIRED" } }, { status: 401 }),
-    )
+    mocks.getAccessContext.mockResolvedValueOnce({ status: "anonymous" })
 
-    render(<LoginPage />)
+    render(await LoginPage())
     expect(screen.getByRole("heading", { name: "Acesse sua conta" })).toBeVisible()
-    await waitFor(() => expect(fetch).toHaveBeenCalledOnce())
-    expect(mocks.portalNavigate).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
+    expect(mocks.redirect).not.toHaveBeenCalled()
 
     const source = readFileSync(
       resolve("src/app/(public)/login/page.tsx"),
       "utf8",
     )
-    expect(source).not.toContain("getAccessContext")
+    expect(source).toContain("getAccessContext")
+    expect(source).not.toContain("LoginRedirectGuard")
   })
 
   it("fails closed when reset-password has no verified recovery AMR", async () => {

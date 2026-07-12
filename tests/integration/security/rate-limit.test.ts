@@ -124,6 +124,14 @@ describe("rate-limit security wrapper", () => {
     "reauth-account-failure",
     "forgot-ip-volume",
     "forgot-account-volume",
+    "file-mutation-user",
+    "file-download-user",
+    "platform-company-create",
+    "platform-company-status",
+    "user-provisioning",
+    "administrative-password-reset",
+    "bank-account-mutation",
+    "platform-observability-read",
   ] as const)("uses the database-frozen policy for %s without persisting its raw key", async (bucket) => {
     const fixture = createFixture(bucket)
 

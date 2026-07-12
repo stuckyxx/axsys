@@ -71,7 +71,7 @@ export function CompanyShell({ children, context }: CompanyShellProps) {
     items.push({
       href: "/app/configuracoes/empresa",
       icon: BuildingsIcon,
-      label: "Empresa",
+      label: "Configurações",
     })
   }
 

@@ -229,9 +229,15 @@ describe("Task 16 mutation synchronization", () => {
     expect(invalidateQueries).not.toHaveBeenCalled()
   })
 
-  it("notifies the protected shell only for a valid same-scope refresh signal", async () => {
+  it("requests an authoritative access-context refetch only for a valid same-scope signal", async () => {
     const client = createTestQueryClient()
-    const onInvalidate = vi.fn()
+    const refetchAccessContext = vi.fn().mockResolvedValue({
+      kind: "company",
+      modules: ["certificates"],
+    })
+    const onInvalidate = vi.fn(() => {
+      void refetchAccessContext()
+    })
     render(
       <MutationSyncProbe
         client={client}
@@ -241,13 +247,16 @@ describe("Task 16 mutation synchronization", () => {
     )
     const channel = FakeBroadcastChannel.instances[0]
 
-    channel.emit(invalidation())
+    channel.emit(invalidation({ resources: ["navigation"] }))
     await waitFor(() => expect(onInvalidate).toHaveBeenCalledOnce())
+    await waitFor(() => expect(refetchAccessContext).toHaveBeenCalledOnce())
+    expect(client.getQueryData(queryKeys.resource(SCOPE, "navigation"))).toBeUndefined()
 
     channel.emit(
       invalidation({ scope: { userId: USER_A, companyId: COMPANY_B } }),
     )
     expect(onInvalidate).toHaveBeenCalledOnce()
+    expect(refetchAccessContext).toHaveBeenCalledOnce()
   })
 
   it("clears a matching ended session and replaces browser history with login", () => {

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   ban: vi.fn(),
   unban: vi.fn(),
+  isBanned: vi.fn(),
   completeAccessReconciliation: vi.fn(),
 }))
 
@@ -32,6 +33,7 @@ vi.mock("@/modules/users/server/auth-admin-gateway", () => ({
   getAuthAdminGateway: vi.fn(() => ({
     banUser: mocks.ban,
     unbanUser: mocks.unban,
+    isUserBanned: mocks.isBanned,
   })),
 }))
 
@@ -72,6 +74,7 @@ function managed(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   mocks.ban.mockResolvedValue(undefined)
   mocks.unban.mockResolvedValue(undefined)
+  mocks.isBanned.mockResolvedValue(false)
   mocks.completeAccessReconciliation.mockImplementation(
     async ({ succeeded }: { succeeded: boolean }) => ({
       status: succeeded ? "completed" : "pending",
@@ -165,7 +168,7 @@ describe("company user service", () => {
     )
   })
 
-  it("completes the durable marker only after Auth reaches the desired state", async () => {
+  it("completes an already-active marker without invalidating the user's session", async () => {
     const persisted = managed({ status: "active", accessState: "active" })
     const operationCorrelationId = randomUUID()
     mocks.rpc.mockResolvedValue({ data: persisted, error: null })
@@ -183,7 +186,8 @@ describe("company user service", () => {
         correlationId: operationCorrelationId,
       }),
     ).resolves.toMatchObject({ accessReconciliation: "complete" })
-    expect(mocks.unban).toHaveBeenCalledWith(persisted.targetUserId)
+    expect(mocks.isBanned).toHaveBeenCalledWith(persisted.targetUserId)
+    expect(mocks.unban).not.toHaveBeenCalled()
     expect(mocks.completeAccessReconciliation).toHaveBeenCalledWith(
       expect.objectContaining({
         membershipId: persisted.membershipId,
@@ -192,5 +196,25 @@ describe("company user service", () => {
         errorCode: null,
       }),
     )
+  })
+
+  it("unbans an active membership when Auth is still banned", async () => {
+    const persisted = managed({ status: "active", accessState: "active" })
+    mocks.rpc.mockResolvedValue({ data: persisted, error: null })
+    mocks.isBanned.mockResolvedValue(true)
+
+    await updateCompanyUser({
+      actor,
+      membershipId: String(persisted.membershipId),
+      displayName: String(persisted.displayName),
+      role: "member",
+      status: "active",
+      modules: ["financial"],
+      suspensionReason: null,
+      version: 1,
+      correlationId: randomUUID(),
+    })
+
+    expect(mocks.unban).toHaveBeenCalledWith(persisted.targetUserId)
   })
 })

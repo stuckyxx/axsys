@@ -55,9 +55,12 @@ select results_eq(
       ('internal_complete_member_auth_access_reconciliation'),
       ('internal_complete_company_access_reconciliation'),('internal_finalize_file_upload'),
       ('internal_get_company_detail'),('internal_get_company_user'),
-      ('internal_get_platform_company_admin'),('internal_list_companies'),
+      ('internal_get_platform_company_admin'),('internal_get_platform_dashboard'),
+      ('internal_get_platform_health'),
+      ('internal_list_companies'),
       ('internal_find_provisioning_auth_user'),
-      ('internal_list_company_bank_accounts'),
+      ('internal_list_company_bank_accounts'),('internal_list_platform_admins'),
+      ('internal_list_platform_audit_events'),
       ('internal_mark_file_cleanup_required'),('internal_mark_provisioning_auth_created'),
       ('internal_mark_provisioning_compensation'),('internal_platform_update_company_admin'),
       ('internal_reject_file_upload'),('internal_release_file_finalization_for_retry'),
@@ -70,7 +73,7 @@ select results_eq(
       ('rotate_app_session_after_reauthentication'),('write_authenticated_audit_event'),
       ('write_security_event')
   ) names(expected) order by expected$$,
-  'BFF catalog contains exactly 51 purpose-specific boundaries'
+  'BFF catalog contains exactly 55 purpose-specific boundaries'
 );
 
 select is_empty(

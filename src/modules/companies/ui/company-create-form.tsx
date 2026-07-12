@@ -1,14 +1,30 @@
 "use client"
 
-import { useEffect, useRef, useState, type FormEvent } from "react"
+import { useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 import { BuildingsIcon, ShieldCheckIcon } from "@phosphor-icons/react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { ReauthenticationDialog } from "@/modules/auth/ui/reauthentication-dialog"
 
 const GENERIC_ERROR = "Não foi possível criar a empresa. Revise os dados e tente novamente."
+
+type CompanyPayload = Readonly<{
+  legalName: FormDataEntryValue | null
+  tradeName: FormDataEntryValue | null
+  cnpj: FormDataEntryValue | null
+  contactEmail: FormDataEntryValue | null
+  contactPhone: FormDataEntryValue | null
+  timezone: FormDataEntryValue | null
+  firstAdmin: Readonly<{
+    displayName: FormDataEntryValue | null
+    email: FormDataEntryValue | null
+    temporaryPassword: string
+    modules: FormDataEntryValue[]
+  }>
+}>
 
 function errorMessage(body: unknown): string {
   if (typeof body !== "object" || body === null || !("error" in body)) {
@@ -22,6 +38,12 @@ function errorMessage(body: unknown): string {
     error.message.length <= 240
     ? error.message
     : GENERIC_ERROR
+}
+
+function errorCode(body: unknown): string | null {
+  if (typeof body !== "object" || body === null || !("error" in body)) return null
+  const error = body.error
+  return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : null
 }
 
 async function csrfToken(signal: AbortSignal): Promise<string> {
@@ -47,13 +69,53 @@ async function csrfToken(signal: AbortSignal): Promise<string> {
 
 export function CompanyCreateForm() {
   const router = useRouter()
-  const request = useRef<AbortController | null>(null)
-  const idempotencyKey = useRef<string | null>(null)
   const [pending, setPending] = useState(false)
+  const [formVersion, setFormVersion] = useState(0)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [reauthOpen, setReauthOpen] = useState(false)
+  const [retryPayload, setRetryPayload] = useState<{ payload: CompanyPayload; key: string } | null>(null)
 
-  useEffect(() => () => request.current?.abort(), [])
+  async function provision(payload: CompanyPayload, key: string) {
+    if (pending) return
+    const controller = new AbortController()
+    setPending(true)
+    setError(null)
+    setMessage(null)
+    try {
+      const token = await csrfToken(controller.signal)
+      const response = await fetch("/api/platform/companies", {
+        method: "POST",
+        cache: "no-store",
+        credentials: "same-origin",
+        redirect: "error",
+        signal: controller.signal,
+        headers: { "content-type": "application/json", "x-csrf-token": token, "idempotency-key": key },
+        body: JSON.stringify(payload),
+      })
+      const body = (await response.json()) as unknown
+      const code = errorCode(body)
+      if (!response.ok) {
+        if (code === "REAUTHENTICATION_REQUIRED") {
+          setRetryPayload({ payload, key })
+          setReauthOpen(true)
+        } else {
+          setRetryPayload(null)
+          setError(errorMessage(body))
+        }
+        return
+      }
+      setRetryPayload(null)
+      setFormVersion((version) => version + 1)
+      setMessage("Empresa e primeiro administrador criados com sucesso.")
+      router.refresh()
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") return
+      setError(GENERIC_ERROR)
+    } finally {
+      setPending(false)
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -70,60 +132,16 @@ export function CompanyCreateForm() {
       setError("A confirmação da senha provisória não confere.")
       return
     }
-    const controller = new AbortController()
-    request.current?.abort()
-    request.current = controller
-    idempotencyKey.current ??= crypto.randomUUID()
-    setPending(true)
-    setError(null)
-    setMessage(null)
-
-    try {
-      const token = await csrfToken(controller.signal)
-      const response = await fetch("/api/platform/companies", {
-        method: "POST",
-        cache: "no-store",
-        credentials: "same-origin",
-        redirect: "error",
-        signal: controller.signal,
-        headers: {
-          "content-type": "application/json",
-          "x-csrf-token": token,
-          "idempotency-key": idempotencyKey.current,
-        },
-        body: JSON.stringify({
-          legalName: values.get("legalName"),
-          tradeName: values.get("tradeName"),
-          cnpj: values.get("cnpj"),
-          contactEmail: values.get("contactEmail"),
-          contactPhone: values.get("contactPhone") || null,
-          timezone: values.get("timezone"),
-          firstAdmin: {
-            displayName: values.get("adminDisplayName"),
-            email: values.get("adminEmail"),
-            temporaryPassword,
-            modules: values.getAll("modules"),
-          },
-        }),
-      })
-      const body = (await response.json()) as unknown
-      if (!response.ok) {
-        setError(errorMessage(body))
-        return
-      }
-      idempotencyKey.current = null
-      form.reset()
-      setMessage("Empresa e primeiro administrador criados com sucesso.")
-      router.refresh()
-    } catch (caught) {
-      if (caught instanceof DOMException && caught.name === "AbortError") return
-      setError(GENERIC_ERROR)
-    } finally {
-      if (!controller.signal.aborted) {
-        request.current = null
-        setPending(false)
-      }
+    const payload: CompanyPayload = {
+      legalName: values.get("legalName"), tradeName: values.get("tradeName"), cnpj: values.get("cnpj"),
+      contactEmail: values.get("contactEmail"), contactPhone: values.get("contactPhone") || null, timezone: values.get("timezone"),
+      firstAdmin: { displayName: values.get("adminDisplayName"), email: values.get("adminEmail"), temporaryPassword, modules: values.getAll("modules") },
     }
+    const passwordInput = form.elements.namedItem("temporaryPassword")
+    const confirmationInput = form.elements.namedItem("passwordConfirmation")
+    if (passwordInput instanceof HTMLInputElement) passwordInput.value = ""
+    if (confirmationInput instanceof HTMLInputElement) confirmationInput.value = ""
+    await provision(payload, crypto.randomUUID())
   }
 
   return (
@@ -142,7 +160,7 @@ export function CompanyCreateForm() {
         </div>
       </div>
 
-      <form className="space-y-8" onSubmit={submit} onChange={() => { idempotencyKey.current = null }}>
+      <form className="space-y-8" key={formVersion} onSubmit={submit} onChange={() => setRetryPayload(null)}>
         <fieldset disabled={pending} className="grid gap-5 md:grid-cols-2">
           <legend className="sr-only">Dados da empresa</legend>
           <div className="space-y-2 md:col-span-2">
@@ -217,6 +235,7 @@ export function CompanyCreateForm() {
           <Button type="submit" disabled={pending}>{pending ? "Criando empresa..." : "Criar empresa"}</Button>
         </div>
       </form>
+      <ReauthenticationDialog open={reauthOpen} onOpenChange={setReauthOpen} onConfirmed={async () => { if (retryPayload) await provision(retryPayload.payload, retryPayload.key) }} />
     </section>
   )
 }

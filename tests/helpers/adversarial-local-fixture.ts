@@ -225,6 +225,18 @@ export class AdversarialLocalFixture {
       identity.userId = result.data.user.id
     }
 
+    this.trackRateKey(`${this.adminA.userId}:${this.companyAId}`)
+    for (const membershipId of [
+      this.adminA.membershipId,
+      this.memberA.membershipId,
+      this.adminB.membershipId,
+    ]) {
+      if (membershipId !== null) {
+        this.trackRateKey(`${this.adminA.userId}:${membershipId}`)
+        this.trackRateKey(`${this.platform.userId}:${membershipId}`)
+      }
+    }
+
     await this.ownerSql.begin(async (transaction) => {
       await transaction`
         insert into public.profiles (user_id, email, display_name)
@@ -276,6 +288,45 @@ export class AdversarialLocalFixture {
     const token = createFixtureCsrfToken(this.csrfSecret)
     jar.set(CSRF_COOKIE_NAME, token)
     return token
+  }
+
+  async adoptProvisionedCompanyIdentity(input: {
+    clientIp: string
+    email: string
+    password: string
+  }): Promise<AdversarialIdentity> {
+    const rows = await this.ownerSql<
+      { displayName: string; membershipId: string; userId: string }[]
+    >`
+      select profile.display_name as "displayName",
+             membership.id as "membershipId",
+             profile.user_id as "userId"
+      from public.profiles profile
+      join public.company_memberships membership
+        on membership.user_id = profile.user_id
+       and membership.company_id = ${this.companyAId}::uuid
+      where profile.email = ${input.email.trim().toLowerCase()}
+    `
+    if (rows.length !== 1 || this.identities.some(({ userId }) => userId === rows[0]?.userId)) {
+      throw new Error("Task 10 provisioned identity adoption failed")
+    }
+    const row = rows[0]
+    const identity: MutableIdentity = {
+      clientIp: input.clientIp,
+      companyId: this.companyAId,
+      displayName: row.displayName,
+      email: input.email.trim().toLowerCase(),
+      jar: new Map(),
+      membershipId: row.membershipId,
+      password: input.password,
+      userId: row.userId,
+    }
+    this.identities.push(identity)
+    this.trackRateKey(identity.clientIp)
+    this.trackRateKey(identity.email)
+    this.trackRateKey(`${this.adminA.userId}:${identity.membershipId}`)
+    this.trackRateKey(`${this.platform.userId}:${identity.membershipId}`)
+    return Object.freeze({ ...identity })
   }
 
   nextCorrelationId(): string {
@@ -435,6 +486,18 @@ export class AdversarialLocalFixture {
             where user_id = any(${userIds}::uuid[])
           `
           await transaction`
+            delete from private.member_auth_access_reconciliations
+            where target_user_id = any(${userIds}::uuid[])
+               or membership_id = any(${membershipIds}::uuid[])
+               or company_id = any(${companyIds}::uuid[])
+          `
+          await transaction`
+            delete from public.provisioning_operations
+            where actor_user_id = any(${userIds}::uuid[])
+               or company_id = any(${companyIds}::uuid[])
+               or auth_user_id = any(${userIds}::uuid[])
+          `
+          await transaction`
             delete from public.member_modules
             where membership_id = any(${membershipIds}::uuid[])
           `
@@ -510,6 +573,14 @@ export class AdversarialLocalFixture {
                where company_id = any(${companyIds}::uuid[]))
             + (select count(*) from private.auth_session_controls where user_id = any(${userIds}::uuid[]))
             + (select count(*) from private.auth_user_session_cutoffs where user_id = any(${userIds}::uuid[]))
+            + (select count(*) from private.member_auth_access_reconciliations
+               where target_user_id = any(${userIds}::uuid[])
+                  or membership_id = any(${membershipIds}::uuid[])
+                  or company_id = any(${companyIds}::uuid[]))
+            + (select count(*) from public.provisioning_operations
+               where actor_user_id = any(${userIds}::uuid[])
+                  or company_id = any(${companyIds}::uuid[])
+                  or auth_user_id = any(${userIds}::uuid[]))
             + (select count(*) from private.auth_password_operations
                where actor_user_id = any(${userIds}::uuid[])
                   or target_user_id = any(${userIds}::uuid[]))

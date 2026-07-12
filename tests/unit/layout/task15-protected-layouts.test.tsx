@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
     throw new Error(`REDIRECT:${location}`)
   }),
   headers: vi.fn(),
+  listCompanies: vi.fn(),
+  getCompanyDetail: vi.fn(),
+  getPlatformDashboard: vi.fn(),
   requireCompanyContext: vi.fn(),
   requirePlatformContext: vi.fn(),
   routerRefresh: vi.fn(),
@@ -27,6 +30,15 @@ vi.mock("next/headers", () => ({ headers: mocks.headers }))
 vi.mock("@/modules/auth/server/guards", () => ({
   requireCompanyContext: mocks.requireCompanyContext,
   requirePlatformContext: mocks.requirePlatformContext,
+}))
+vi.mock("@/lib/db/bff", () => ({
+  bffDb: {
+    listCompanies: mocks.listCompanies,
+    getCompanyDetail: mocks.getCompanyDetail,
+  },
+}))
+vi.mock("@/modules/platform/server/platform-repository", () => ({
+  getPlatformDashboard: mocks.getPlatformDashboard,
 }))
 
 import AppError from "@/app/(protected)/app/error"
@@ -54,6 +66,19 @@ beforeEach(() => {
   mocks.requireCompanyContext.mockResolvedValue(createCompanyContext())
   mocks.headers.mockResolvedValue({
     get: (name: string) => (name === "x-nonce" ? CSP_NONCE : null),
+  })
+  mocks.listCompanies.mockResolvedValue({ items: [], nextCursor: null })
+  mocks.getPlatformDashboard.mockResolvedValue({
+    checkedAt: "2026-07-12T12:00:00.000Z",
+    activeCompanies: 0,
+    archivedCompanies: 0,
+    activeAdmins: 0,
+    activeUsers: 0,
+    activeBankAccounts: 0,
+    archivedBankAccounts: 0,
+    pendingCompensations: 0,
+    pendingCompanyAccessReconciliations: 0,
+    pendingMemberAccessReconciliations: 0,
   })
 })
 
@@ -270,9 +295,9 @@ describe("Task 15 protected route states", () => {
     expect(reset).toHaveBeenCalledTimes(1)
   })
 
-  it("uses truthful foundation copy without fabricated business metrics", () => {
-    const platform = render(<PlatformPage />)
-    expect(screen.getByRole("heading", { name: "Visão geral da plataforma" })).toBeVisible()
+  it("uses truthful foundation copy without fabricated business metrics", async () => {
+    const platform = render(await PlatformPage())
+    expect(screen.getByRole("heading", { name: "Visão da plataforma" })).toBeVisible()
     expect(platform.container.textContent).not.toMatch(/R\$|\d+(?:[.,]\d+)?%/u)
     platform.unmount()
 

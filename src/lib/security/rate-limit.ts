@@ -22,6 +22,7 @@ export type RateLimitBucket =
   | "user-provisioning"
   | "administrative-password-reset"
   | "bank-account-mutation"
+  | "platform-observability-read"
 
 export type AccountFailureRateLimitBucket =
   | "login-account-failure"
@@ -100,6 +101,11 @@ const RATE_LIMIT_POLICIES = Object.freeze({
     limit: 30,
     windowSeconds: 3_600,
     blockSeconds: 3_600,
+  }),
+  "platform-observability-read": Object.freeze({
+    limit: 120,
+    windowSeconds: 60,
+    blockSeconds: 60,
   }),
 } satisfies Record<RateLimitBucket, RateLimitPolicy>)
 

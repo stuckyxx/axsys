@@ -749,7 +749,7 @@ describe("axsys_bff", () => {
     ])
   })
 
-  it("has EXECUTE on all and only the fifty-one allowlisted boundaries", async () => {
+  it("has EXECUTE on all and only the fifty-five allowlisted boundaries", async () => {
     const routines = await postgresOwnerSql<{ routineName: string }[]>`
       select function.proname as "routineName"
       from pg_proc function
@@ -789,8 +789,12 @@ describe("axsys_bff", () => {
       "internal_get_company_detail",
       "internal_get_company_user",
       "internal_get_platform_company_admin",
+      "internal_get_platform_dashboard",
+      "internal_get_platform_health",
       "internal_list_companies",
       "internal_list_company_bank_accounts",
+      "internal_list_platform_admins",
+      "internal_list_platform_audit_events",
       "internal_mark_file_cleanup_required",
       "internal_mark_provisioning_auth_created",
       "internal_mark_provisioning_compensation",

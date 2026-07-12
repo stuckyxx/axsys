@@ -9,6 +9,7 @@ export type AuthAdminGateway = Readonly<{
     emailConfirm: true
     provisioningOperationId: string
   }): Promise<{ id: string }>
+  isUserBanned(userId: string): Promise<boolean>
   banUser(userId: string): Promise<void>
   unbanUser(userId: string): Promise<void>
   deleteUser(userId: string): Promise<void>
@@ -28,6 +29,10 @@ type AuthAdminClient = Readonly<{
     userId: string,
     attributes: { ban_duration: "876000h" | "none" },
   ): Promise<{ error: unknown | null }>
+  getUserById(userId: string): Promise<{
+    data: { user: { banned_until?: string | null } | null }
+    error: unknown | null
+  }>
   deleteUser(
     userId: string,
     shouldSoftDelete: false,
@@ -79,6 +84,19 @@ export function createAuthAdminGateway(
         ban_duration: "876000h",
       })
       assertSuccess(result.error)
+    },
+
+    async isUserBanned(userId) {
+      const result = await admin.getUserById(userId)
+      assertSuccess(result.error)
+      if (result.data.user === null) throw new Error(AUTH_ADMIN_FAILURE)
+      const bannedUntil = result.data.user.banned_until
+      if (bannedUntil === null || bannedUntil === undefined || bannedUntil === "") {
+        return false
+      }
+      const timestamp = Date.parse(bannedUntil)
+      if (!Number.isFinite(timestamp)) throw new Error(AUTH_ADMIN_FAILURE)
+      return timestamp > Date.now()
     },
 
     async unbanUser(userId) {

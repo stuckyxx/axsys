@@ -11,6 +11,13 @@ const cursorSchema = z
   })
   .strict()
 
+const adminCursorSchema = z
+  .object({
+    createdAt: z.iso.datetime({ offset: true }),
+    membershipId: z.uuid(),
+  })
+  .strict()
+
 type PlatformIdentity = Readonly<{ userId: string; sessionId: string }>
 
 function decodeCursor(value: string): z.infer<typeof cursorSchema> {
@@ -24,6 +31,20 @@ function decodeCursor(value: string): z.infer<typeof cursorSchema> {
 }
 
 function encodeCursor(cursor: z.infer<typeof cursorSchema>): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url")
+}
+
+function decodeAdminCursor(value: string): z.infer<typeof adminCursorSchema> {
+  try {
+    return adminCursorSchema.parse(
+      JSON.parse(Buffer.from(value, "base64url").toString("utf8")),
+    )
+  } catch {
+    throw new z.ZodError([])
+  }
+}
+
+function encodeAdminCursor(cursor: z.infer<typeof adminCursorSchema>): string {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url")
 }
 
@@ -58,7 +79,37 @@ export function getCompanyDetail(
   })
 }
 
+export async function listPlatformAdmins(
+  identity: PlatformIdentity,
+  filters: Readonly<{ search?: string; cursor?: string; limit: number }>,
+) {
+  const cursor = filters.cursor ? decodeAdminCursor(filters.cursor) : null
+  const result = await bffDb.listPlatformAdmins({
+    actorUserId: identity.userId,
+    sessionId: identity.sessionId,
+    search: filters.search ?? null,
+    cursorCreatedAt: cursor?.createdAt ?? null,
+    cursorMembershipId: cursor?.membershipId ?? null,
+    limit: filters.limit,
+  })
+  return {
+    items: result.items,
+    nextCursor: result.nextCursor
+      ? encodeAdminCursor(result.nextCursor)
+      : null,
+  }
+}
+
+export function getPlatformDashboard(identity: PlatformIdentity) {
+  return bffDb.getPlatformDashboard({
+    actorUserId: identity.userId,
+    sessionId: identity.sessionId,
+  })
+}
+
 export const platformRepository = Object.freeze({
   getCompanyDetail,
+  getPlatformDashboard,
   listCompanies,
+  listPlatformAdmins,
 })

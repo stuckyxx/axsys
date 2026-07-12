@@ -187,8 +187,12 @@ select results_eq(
     ('internal_get_company_detail'),
     ('internal_get_company_user'),
     ('internal_get_platform_company_admin'),
+    ('internal_get_platform_dashboard'),
+    ('internal_get_platform_health'),
     ('internal_list_companies'),
     ('internal_list_company_bank_accounts'),
+    ('internal_list_platform_admins'),
+    ('internal_list_platform_audit_events'),
     ('internal_mark_file_cleanup_required'),
     ('internal_mark_provisioning_auth_created'),
     ('internal_mark_provisioning_compensation'),
@@ -209,7 +213,7 @@ select results_eq(
     ('rotate_app_session_after_reauthentication'),
     ('write_authenticated_audit_event'),
     ('write_security_event')$$,
-  'BFF preserva as cinquenta e uma boundaries aprovadas até Task 8'
+  'BFF preserva as cinquenta e cinco boundaries aprovadas até Task 9'
 );
 select is_empty(
   $$select role_name || ':' || function.oid::regprocedure::text

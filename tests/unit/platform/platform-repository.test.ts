@@ -1,18 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
+  getPlatformDashboard,
   getCompanyDetail,
+  listPlatformAdmins,
   listCompanies,
 } from "@/modules/platform/server/platform-repository"
 
 const mocks = vi.hoisted(() => ({
   getCompanyDetail: vi.fn(),
+  getPlatformDashboard: vi.fn(),
+  listPlatformAdmins: vi.fn(),
   listCompanies: vi.fn(),
 }))
 
 vi.mock("@/lib/db/bff", () => ({
   bffDb: {
     getCompanyDetail: mocks.getCompanyDetail,
+    getPlatformDashboard: mocks.getPlatformDashboard,
+    listPlatformAdmins: mocks.listPlatformAdmins,
     listCompanies: mocks.listCompanies,
   },
 }))
@@ -78,6 +84,48 @@ describe("platform repository", () => {
       actorUserId: identity.userId,
       sessionId: identity.sessionId,
       companyId,
+    })
+  })
+
+  it("decodes the administrator keyset without enumerating companies", async () => {
+    const cursor = Buffer.from(JSON.stringify({
+      createdAt: "2026-07-12T12:00:00.000Z",
+      membershipId: "76000000-0000-4000-8000-000000000001",
+    }), "utf8").toString("base64url")
+    mocks.listPlatformAdmins.mockResolvedValue({
+      items: [],
+      nextCursor: {
+        createdAt: "2026-07-11T12:00:00.000Z",
+        membershipId: "76000000-0000-4000-8000-000000000002",
+      },
+    })
+
+    const result = await listPlatformAdmins(identity, {
+      search: "sertao",
+      cursor,
+      limit: 25,
+    })
+
+    expect(mocks.listPlatformAdmins).toHaveBeenCalledWith({
+      actorUserId: identity.userId,
+      sessionId: identity.sessionId,
+      search: "sertao",
+      cursorCreatedAt: "2026-07-12T12:00:00.000Z",
+      cursorMembershipId: "76000000-0000-4000-8000-000000000001",
+      limit: 25,
+    })
+    expect(result.nextCursor).toEqual(expect.any(String))
+    expect(mocks.listCompanies).not.toHaveBeenCalled()
+    expect(mocks.getCompanyDetail).not.toHaveBeenCalled()
+  })
+
+  it("reads the dashboard from one aggregate BFF call", async () => {
+    const dashboard = { activeCompanies: 7 }
+    mocks.getPlatformDashboard.mockResolvedValue(dashboard)
+    await expect(getPlatformDashboard(identity)).resolves.toBe(dashboard)
+    expect(mocks.getPlatformDashboard).toHaveBeenCalledWith({
+      actorUserId: identity.userId,
+      sessionId: identity.sessionId,
     })
   })
 })

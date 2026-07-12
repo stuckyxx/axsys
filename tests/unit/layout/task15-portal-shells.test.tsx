@@ -80,10 +80,63 @@ describe("Task 15 portal shells", () => {
       "Certidões",
       "Usuários",
       "Perfil",
-      "Empresa",
+      "Configurações",
     ]) {
       expect(within(navigation).getByRole("link", { name: label })).toBeVisible()
     }
+  })
+
+  it("keeps management destinations available to an admin without operational modules", () => {
+    render(
+      <CompanyShell
+        context={{ ...createCompanyContext(), modules: Object.freeze([]) }}
+      >
+        <h1>Dashboard</h1>
+      </CompanyShell>,
+    )
+
+    const navigation = screen.getByRole("navigation", {
+      name: "Navegação da empresa",
+    })
+    expect(within(navigation).getByRole("link", { name: "Usuários" })).toHaveAttribute(
+      "href",
+      "/app/usuarios",
+    )
+    expect(
+      within(navigation).getByRole("link", { name: "Configurações" }),
+    ).toHaveAttribute("href", "/app/configuracoes/empresa")
+    expect(within(navigation).queryByRole("link", { name: "Administrativo" })).not.toBeInTheDocument()
+    expect(within(navigation).queryByRole("link", { name: "Financeiro" })).not.toBeInTheDocument()
+    expect(within(navigation).queryByRole("link", { name: "Certidões" })).not.toBeInTheDocument()
+  })
+
+  it("removes revoked module links only after receiving a new authoritative context", () => {
+    const initial = createCompanyContext()
+    const view = render(
+      <CompanyShell context={initial}>
+        <h1>Dashboard</h1>
+      </CompanyShell>,
+    )
+    const navigation = screen.getByRole("navigation", {
+      name: "Navegação da empresa",
+    })
+
+    expect(within(navigation).getByRole("link", { name: "Financeiro" })).toBeVisible()
+    view.rerender(
+      <CompanyShell
+        context={{
+          ...initial,
+          modules: Object.freeze(["certificates"] as const),
+        }}
+      >
+        <h1>Dashboard</h1>
+      </CompanyShell>,
+    )
+
+    expect(within(navigation).queryByRole("link", { name: "Financeiro" })).not.toBeInTheDocument()
+    expect(within(navigation).getByRole("link", { name: "Certidões" })).toBeVisible()
+    expect(within(navigation).getByRole("link", { name: "Usuários" })).toBeVisible()
+    expect(within(navigation).getByRole("link", { name: "Configurações" })).toBeVisible()
   })
 
   it("uses accessible 44px controls for mobile and tablet navigation", async () => {

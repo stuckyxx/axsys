@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { CompanyUsersPage, type CompanyUserSummary } from "@/modules/users/ui/company-users-page"
+import { ResetPasswordDialog } from "@/modules/users/ui/reset-password-dialog"
 import { UserForm } from "@/modules/users/ui/user-form"
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }))
@@ -22,6 +23,41 @@ const USER: CompanyUserSummary = {
 beforeEach(() => vi.stubGlobal("fetch", vi.fn()))
 
 describe("Task 7 company users UI", () => {
+  it("keeps every user-management action at least 44px on touch screens", async () => {
+    const user = userEvent.setup()
+    render(
+      <CompanyUsersPage
+        initialUsers={[USER]}
+        initialNextCursor={null}
+        currentMembershipId="10000000-0000-4000-8000-000000000099"
+        initialQuery=""
+        initialCursor={null}
+        initialPreviousCursor={null}
+      />,
+    )
+
+    for (const name of ["Novo acesso", "Buscar", "Página anterior", "Próxima página"]) {
+      expect(screen.getByRole("button", { name })).toHaveClass("min-h-11")
+    }
+    for (const name of ["Editar acesso", "Redefinir senha"]) {
+      for (const action of screen.getAllByRole("button", { name })) {
+        expect(action).toHaveClass("size-11")
+      }
+    }
+
+    await user.click(screen.getAllByRole("button", { name: "Editar acesso" })[0])
+    expect(screen.getByLabelText("Nome", { exact: true })).toHaveClass("min-h-11")
+    await user.click(screen.getByRole("button", { name: "Fechar" }))
+
+    await user.click(screen.getByRole("button", { name: "Novo acesso" }))
+    expect(screen.getByRole("button", { name: "Fechar" })).toHaveClass("size-11")
+    expect(screen.getByRole("button", { name: "Cancelar" })).toHaveClass("min-h-11")
+    expect(screen.getByRole("button", { name: "Criar acesso" })).toHaveClass("min-h-11")
+    for (const label of ["Nome completo", "E-mail", "Senha", "Confirmação", "Papel"]) {
+      expect(screen.getByLabelText(label, { exact: true })).toHaveClass("min-h-11")
+    }
+  })
+
   it("hydrates deep pagination state from SSR and returns to the exact previous cursor", async () => {
     const user = userEvent.setup()
     vi.mocked(fetch).mockResolvedValueOnce(Response.json({ items: [USER], nextCursor: null }))
@@ -98,5 +134,79 @@ describe("Task 7 company users UI", () => {
     expect(screen.getByRole("button", { name: "Fechar" })).toBeDisabled()
     expect(screen.getByRole("dialog", { name: "Novo acesso" })).toBeVisible()
     expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it("retries a categorized password reset after reauthentication without losing the secret", async () => {
+    const user = userEvent.setup()
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(Response.json({ token: "csrf-reset-1" }))
+      .mockResolvedValueOnce(Response.json({ error: { code: "REAUTHENTICATION_REQUIRED", message: "Confirme sua senha." } }, { status: 403 }))
+      .mockResolvedValueOnce(Response.json({ token: "csrf-reauth" }))
+      .mockResolvedValueOnce(Response.json({ kind: "company" }))
+      .mockResolvedValueOnce(Response.json({ token: "csrf-reset-2" }))
+      .mockResolvedValueOnce(Response.json({ ok: true }))
+
+    render(
+      <ResetPasswordDialog
+        membershipId={USER.membershipId}
+        displayName={USER.displayName}
+        onClose={vi.fn()}
+      />,
+    )
+    await user.type(
+      screen.getByLabelText("Nova senha provisória"),
+      "Senha provisória forte 42!",
+    )
+    await user.type(
+      screen.getByLabelText("Confirme a senha"),
+      "Senha provisória forte 42!",
+    )
+    await user.selectOptions(
+      screen.getByLabelText("Motivo administrativo"),
+      "ADMIN_RESET_SECURITY_INCIDENT",
+    )
+    await user.click(screen.getByRole("button", { name: "Redefinir senha" }))
+
+    expect(await screen.findByRole("dialog", { name: "Confirme sua senha" })).toBeVisible()
+    await user.type(screen.getByLabelText("Senha atual"), "senha-atual-segura")
+    await user.click(screen.getByRole("button", { name: "Confirmar" }))
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Senha provisória atualizada",
+    )
+    const resetRequests = vi.mocked(fetch).mock.calls.filter(([url]) =>
+      String(url).endsWith(`/api/company/users/${USER.membershipId}/reset-password`),
+    )
+    expect(resetRequests).toHaveLength(2)
+    for (const [, options] of resetRequests) {
+      expect(JSON.parse(String(options?.body))).toMatchObject({
+        reasonCode: "ADMIN_RESET_SECURITY_INCIDENT",
+        temporaryPassword: "Senha provisória forte 42!",
+      })
+    }
+  })
+
+  it("keeps password reset full-height, scrollable and touch-safe on mobile", () => {
+    render(
+      <ResetPasswordDialog
+        membershipId={USER.membershipId}
+        displayName={USER.displayName}
+        onClose={vi.fn()}
+      />,
+    )
+
+    const dialog = screen.getByRole("dialog", { name: "Redefinir senha" })
+    expect(dialog).toHaveClass("h-dvh", "max-h-dvh", "overflow-hidden")
+    expect(dialog.querySelector("form")).toHaveClass(
+      "min-h-0",
+      "flex-1",
+      "overflow-y-auto",
+    )
+    expect(screen.getByRole("button", { name: "Fechar" })).toHaveClass("size-11")
+    expect(screen.getByRole("button", { name: "Cancelar" })).toHaveClass("min-h-11")
+    expect(screen.getByRole("button", { name: "Redefinir senha" })).toHaveClass("min-h-11")
+    expect(screen.getByLabelText("Motivo administrativo")).toHaveClass("min-h-11")
+    expect(screen.getByLabelText("Nova senha provisória")).toHaveClass("min-h-11")
+    expect(screen.getByLabelText("Confirme a senha")).toHaveClass("min-h-11")
   })
 })

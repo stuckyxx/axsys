@@ -12,7 +12,7 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe("bffDb boundary", () => {
-  it("exports only the fifty-one typed application database operations", () => {
+  it("exports only the fifty-five typed application database operations", () => {
     expect(Object.keys(bffDb).sort()).toEqual([
       "activateFileUploadAuthorization",
       "archiveBankAccount",
@@ -43,8 +43,12 @@ describe("bffDb boundary", () => {
       "getCompanyDetail",
       "getCompanyUser",
       "getPlatformCompanyAdmin",
+      "getPlatformDashboard",
+      "getPlatformHealth",
       "listCompanies",
       "listCompanyUserDirectory",
+      "listPlatformAdmins",
+      "listPlatformAuditEvents",
       "listPlatformBankAccounts",
       "markFileCleanupRequired",
       "markProvisioningAuthCreated",
@@ -93,6 +97,20 @@ describe("bffDb boundary", () => {
       ]
     >()
     expectTypeOf(bffDb.clearRateLimit).returns.toEqualTypeOf<Promise<void>>()
+    expectTypeOf(bffDb.getPlatformHealth).returns.toEqualTypeOf<
+      Promise<{
+        checkedAt: string
+        pendingCompensations: number
+        pendingCompanyAccessReconciliations: number
+        pendingMemberAccessReconciliations: number
+        pendingFileCleanup: number
+        scanFailures: number
+        storageBytes: number
+        reservedStorageBytes: number
+        companiesNearQuota: number
+        quotaDriftAlerts: number
+      }>
+    >()
     expectTypeOf<Parameters<typeof bffDb.registerAuthSession>>().toEqualTypeOf<
       [sessionId: string, userId: string, rememberMe: boolean]
     >()
@@ -408,8 +426,12 @@ describe("bffDb boundary", () => {
       "internal_get_company_detail",
       "internal_get_company_user",
       "internal_get_platform_company_admin",
+      "internal_get_platform_dashboard",
+      "internal_get_platform_health",
       "internal_list_companies",
       "internal_list_company_bank_accounts",
+      "internal_list_platform_admins",
+      "internal_list_platform_audit_events",
       "internal_mark_file_cleanup_required",
       "internal_mark_provisioning_auth_created",
       "internal_mark_provisioning_compensation",

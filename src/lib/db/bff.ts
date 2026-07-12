@@ -277,6 +277,64 @@ export type BankAccountSummarySnapshot = {
   updatedAt: string
 }
 
+export type PlatformAuditEventSnapshot = {
+  id: string
+  actorUserId: string
+  action: string
+  resourceType: string
+  resourceId: string | null
+  outcome: "success" | "denied" | "failure"
+  reasonCode: string | null
+  correlationId: string
+  metadata: Record<string, unknown>
+  occurredAt: string
+}
+
+export type PlatformHealthSnapshot = {
+  checkedAt: string
+  pendingCompensations: number
+  pendingCompanyAccessReconciliations: number
+  pendingMemberAccessReconciliations: number
+  pendingFileCleanup: number
+  scanFailures: number
+  storageBytes: number
+  reservedStorageBytes: number
+  companiesNearQuota: number
+  quotaDriftAlerts: number
+}
+
+export type PlatformAdminSnapshot = {
+  membershipId: string
+  companyId: string
+  companyLegalName: string
+  displayName: string
+  email: string
+  status: "active" | "suspended"
+  modules: ("administrative" | "financial" | "certificates")[]
+  createdAt: string
+  version: number
+  mustChangePassword: boolean
+  temporaryPasswordExpiresAt: string | null
+  accessState:
+    | "active"
+    | "suspended"
+    | "password_change_required"
+    | "archived_company"
+}
+
+export type PlatformDashboardSnapshot = {
+  checkedAt: string
+  activeCompanies: number
+  archivedCompanies: number
+  activeAdmins: number
+  activeUsers: number
+  activeBankAccounts: number
+  archivedBankAccounts: number
+  pendingCompensations: number
+  pendingCompanyAccessReconciliations: number
+  pendingMemberAccessReconciliations: number
+}
+
 const companyListSnapshotSchema = z
   .object({
     id: z.uuid(),
@@ -433,6 +491,75 @@ const bankAccountSummarySnapshotSchema = z
     version: z.int().positive(),
     createdAt: z.iso.datetime({ offset: true }),
     updatedAt: z.iso.datetime({ offset: true }),
+  })
+  .strict()
+
+const auditMetadataSchema = z.record(z.string(), z.unknown())
+
+const platformAuditEventSnapshotSchema = z
+  .object({
+    id: z.uuid(),
+    actorUserId: z.uuid(),
+    action: z.string().min(3).max(128),
+    resourceType: z.string().min(1).max(64),
+    resourceId: z.uuid().nullable(),
+    outcome: z.enum(["success", "denied", "failure"]),
+    reasonCode: z.string().min(1).max(128).nullable(),
+    correlationId: z.uuid(),
+    metadata: auditMetadataSchema,
+    occurredAt: z.iso.datetime({ offset: true }),
+  })
+  .strict()
+
+const platformHealthSnapshotSchema = z
+  .object({
+    checkedAt: z.iso.datetime({ offset: true }),
+    pendingCompensations: z.int().nonnegative(),
+    pendingCompanyAccessReconciliations: z.int().nonnegative(),
+    pendingMemberAccessReconciliations: z.int().nonnegative(),
+    pendingFileCleanup: z.int().nonnegative(),
+    scanFailures: z.int().nonnegative(),
+    storageBytes: z.int().nonnegative(),
+    reservedStorageBytes: z.int().nonnegative(),
+    companiesNearQuota: z.int().nonnegative(),
+    quotaDriftAlerts: z.int().nonnegative(),
+  })
+  .strict()
+
+const platformAdminSnapshotSchema = z
+  .object({
+    membershipId: z.uuid(),
+    companyId: z.uuid(),
+    companyLegalName: z.string().min(2).max(160),
+    displayName: z.string().min(2).max(120),
+    email: z.email().max(254),
+    status: z.enum(["active", "suspended"]),
+    modules: z.array(z.enum(["administrative", "financial", "certificates"])),
+    createdAt: z.iso.datetime({ offset: true }),
+    version: z.int().positive(),
+    mustChangePassword: z.boolean(),
+    temporaryPasswordExpiresAt: z.iso.datetime({ offset: true }).nullable(),
+    accessState: z.enum([
+      "active",
+      "suspended",
+      "password_change_required",
+      "archived_company",
+    ]),
+  })
+  .strict()
+
+const platformDashboardSnapshotSchema = z
+  .object({
+    checkedAt: z.iso.datetime({ offset: true }),
+    activeCompanies: z.int().nonnegative(),
+    archivedCompanies: z.int().nonnegative(),
+    activeAdmins: z.int().nonnegative(),
+    activeUsers: z.int().nonnegative(),
+    activeBankAccounts: z.int().nonnegative(),
+    archivedBankAccounts: z.int().nonnegative(),
+    pendingCompensations: z.int().nonnegative(),
+    pendingCompanyAccessReconciliations: z.int().nonnegative(),
+    pendingMemberAccessReconciliations: z.int().nonnegative(),
   })
   .strict()
 
@@ -1686,5 +1813,101 @@ export const bffDb = {
     `
     if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
     return bankAccountSummarySnapshotSchema.array().parse(row.result)
+  },
+
+  async listPlatformAuditEvents(input: {
+    actorUserId: string
+    sessionId: string
+    action: string | null
+    resourceType: string | null
+    outcome: "success" | "denied" | "failure" | null
+    cursorOccurredAt: string | null
+    cursorId: string | null
+    limit: number
+  }): Promise<PlatformAuditEventSnapshot[]> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: unknown }]>`
+      select private.internal_list_platform_audit_events(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.action},
+        ${input.resourceType},
+        ${input.outcome},
+        ${input.cursorOccurredAt}::timestamptz,
+        ${input.cursorId}::uuid,
+        ${input.limit}
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return platformAuditEventSnapshotSchema.array().parse(row.result)
+  },
+
+  async getPlatformHealth(input: {
+    actorUserId: string
+    sessionId: string
+  }): Promise<PlatformHealthSnapshot> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: unknown }]>`
+      select private.internal_get_platform_health(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return platformHealthSnapshotSchema.parse(row.result)
+  },
+
+  async listPlatformAdmins(input: {
+    actorUserId: string
+    sessionId: string
+    search: string | null
+    cursorCreatedAt: string | null
+    cursorMembershipId: string | null
+    limit: number
+  }): Promise<{
+    items: PlatformAdminSnapshot[]
+    nextCursor: { createdAt: string; membershipId: string } | null
+  }> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: unknown }]>`
+      select private.internal_list_platform_admins(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.search},
+        ${input.cursorCreatedAt}::timestamptz,
+        ${input.cursorMembershipId}::uuid,
+        ${input.limit}
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    const result = z
+      .object({
+        items: z.array(platformAdminSnapshotSchema),
+        nextCursor: z
+          .object({
+            createdAt: z.iso.datetime({ offset: true }),
+            membershipId: z.uuid(),
+          })
+          .strict()
+          .nullable(),
+      })
+      .strict()
+      .parse(row.result)
+    return { items: [...result.items], nextCursor: result.nextCursor }
+  },
+
+  async getPlatformDashboard(input: {
+    actorUserId: string
+    sessionId: string
+  }): Promise<PlatformDashboardSnapshot> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: unknown }]>`
+      select private.internal_get_platform_dashboard(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return platformDashboardSnapshotSchema.parse(row.result)
   },
 }

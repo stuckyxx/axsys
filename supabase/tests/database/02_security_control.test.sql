@@ -119,6 +119,8 @@ select results_eq(
     from private.rate_limit_policies
     order by bucket$$,
   $$values
+    ('administrative-password-reset', 10, 3600, 3600, false),
+    ('bank-account-mutation', 30, 3600, 3600, false),
     ('file-download-user', 60, 60, 60, false),
     ('file-mutation-user', 20, 60, 60, false),
     ('forgot-account-volume', 3, 3600, 3600, false),
@@ -126,9 +128,12 @@ select results_eq(
     ('login-account-failure', 5, 900, 900, true),
     ('login-ip-volume', 30, 900, 1800, false),
     ('platform-company-create', 10, 3600, 3600, false),
+    ('platform-company-status', 20, 3600, 3600, false),
+    ('platform-observability-read', 120, 60, 60, false),
     ('reauth-account-failure', 5, 900, 900, true),
-    ('reauth-ip-volume', 20, 900, 1800, false)$$,
-  'policies de rate limit contêm exatamente as nove tuplas congeladas'
+    ('reauth-ip-volume', 20, 900, 1800, false),
+    ('user-provisioning', 20, 3600, 3600, false)$$,
+  'policies de rate limit contêm exatamente as quatorze tuplas congeladas'
 );
 select results_eq(
   $$select namespace.nspname::text collate "default",
@@ -717,8 +722,12 @@ select results_eq(
     ('private.internal_get_company_detail(uuid,uuid,uuid)'),
     ('private.internal_get_company_user(uuid,uuid,uuid)'),
     ('private.internal_get_platform_company_admin(uuid,uuid,uuid)'),
+    ('private.internal_get_platform_dashboard(uuid,uuid)'),
+    ('private.internal_get_platform_health(uuid,uuid)'),
     ('private.internal_list_companies(uuid,uuid,text,company_status,timestamp with time zone,uuid,integer)'),
     ('private.internal_list_company_bank_accounts(uuid,uuid,uuid)'),
+    ('private.internal_list_platform_admins(uuid,uuid,text,timestamp with time zone,uuid,integer)'),
+    ('private.internal_list_platform_audit_events(uuid,uuid,text,text,audit_outcome,timestamp with time zone,uuid,integer)'),
     ('private.internal_mark_file_cleanup_required(uuid,uuid,uuid,text)'),
     ('private.internal_mark_provisioning_auth_created(uuid,uuid,uuid,uuid)'),
     ('private.internal_mark_provisioning_compensation(uuid,uuid,uuid,provisioning_status,text)'),
@@ -739,7 +748,7 @@ select results_eq(
     ('private.rotate_app_session_after_reauthentication(uuid,uuid,uuid,uuid)'),
     ('private.write_authenticated_audit_event(uuid,uuid,text,text,uuid,audit_outcome,text,uuid,text,text,jsonb)'),
     ('private.write_security_event(text,uuid,text,text,audit_outcome,text,uuid,jsonb)')$$,
-  'axsys_bff recebe exatamente cinquenta e um EXECUTEs efetivos'
+  'axsys_bff recebe exatamente cinquenta e cinco EXECUTEs efetivos'
 );
 select results_eq(
   $$select role_name::text collate "default",

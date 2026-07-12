@@ -176,9 +176,10 @@ async function reconcileMemberAuthAccess(input: {
   let succeeded = true
   try {
     const auth = getAuthAdminGateway()
-    if (input.status === "suspended") {
+    const isBanned = await auth.isUserBanned(input.targetUserId)
+    if (input.status === "suspended" && !isBanned) {
       await auth.banUser(input.targetUserId)
-    } else {
+    } else if (input.status === "active" && isBanned) {
       await auth.unbanUser(input.targetUserId)
     }
   } catch {

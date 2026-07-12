@@ -9,6 +9,10 @@ function fixture() {
       error: null,
     }),
     updateUserById: vi.fn().mockResolvedValue({ data: {}, error: null }),
+    getUserById: vi.fn().mockResolvedValue({
+      data: { user: { banned_until: null } },
+      error: null,
+    }),
     deleteUser: vi.fn().mockResolvedValue({ data: {}, error: null }),
   }
   return { admin, gateway: createAuthAdminGateway(admin) }
@@ -51,6 +55,19 @@ describe("Auth Admin gateway", () => {
       ban_duration: "none",
     })
     expect(admin.deleteUser).toHaveBeenCalledWith(userId, false)
+  })
+
+  it("reports the effective provider ban state without mutating Auth", async () => {
+    const { admin, gateway } = fixture()
+    const userId = crypto.randomUUID()
+    admin.getUserById.mockResolvedValue({
+      data: { user: { banned_until: "2099-01-01T00:00:00.000Z" } },
+      error: null,
+    })
+
+    await expect(gateway.isUserBanned(userId)).resolves.toBe(true)
+    expect(admin.getUserById).toHaveBeenCalledWith(userId)
+    expect(admin.updateUserById).not.toHaveBeenCalled()
   })
 
   it("normalizes provider errors without leaking details", async () => {

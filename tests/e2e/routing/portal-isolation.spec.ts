@@ -35,7 +35,7 @@ test.describe("Task 15 portal isolation", () => {
 
     await expect(page).toHaveURL(/\/platform$/u)
     await expect(
-      page.getByRole("heading", { name: "Visão geral da plataforma" }),
+      page.getByRole("heading", { name: "Visão da plataforma" }),
     ).toBeVisible()
     await expect(page.getByText("Portal da plataforma")).toBeVisible()
     await expect(
@@ -103,7 +103,7 @@ test.describe("Task 15 portal isolation", () => {
     await expect(dialog).toBeVisible()
     await expect(navigation).toHaveCSS("overflow-y", "auto")
 
-    const companyLink = navigation.getByRole("link", { name: "Empresa" })
+    const companyLink = navigation.getByRole("link", { name: "Configurações" })
     await companyLink.scrollIntoViewIfNeeded()
     await expect(companyLink).toBeVisible()
     const box = await dialog.boundingBox()
