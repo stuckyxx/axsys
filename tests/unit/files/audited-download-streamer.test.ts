@@ -236,7 +236,9 @@ describe("audited download streamer", () => {
     }
     await new Promise((resolve) => setTimeout(resolve, 10))
 
-    const rejectedAudit = vi.fn().mockResolvedValue(undefined)
+    const rejectedAudit = vi
+      .fn()
+      .mockReturnValue(new Promise<void>(() => undefined))
     const rejectedSourceCancel = vi.fn()
     const rejected = createAuditedDownloadResponse({
       source: new ReadableStream<Uint8Array>({
@@ -248,7 +250,14 @@ describe("audited download streamer", () => {
       originalName: "excedente.bin",
       complete: rejectedAudit,
     })
-    await expect(rejected.arrayBuffer()).rejects.toThrow("Download unavailable")
+    await expect(
+      Promise.race([
+        rejected.arrayBuffer(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("fail-fast timeout")), 200),
+        ),
+      ]),
+    ).rejects.toThrow("Download unavailable")
     expect(rejectedSourceCancel).toHaveBeenCalledOnce()
     expect(rejectedAudit).toHaveBeenCalledWith({
       outcome: "stream_failed",

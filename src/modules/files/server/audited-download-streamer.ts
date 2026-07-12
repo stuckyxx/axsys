@@ -32,6 +32,8 @@ const DOWNLOAD_ERROR = "Download unavailable"
 const MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024
 const MAX_CONCURRENT_VERIFICATIONS = 4
 const VERIFICATION_SLOT_LEASE_MS = 120_000
+const AUDIT_COMPLETION_TIMEOUT_MS = 10_000
+const STORAGE_CANCEL_TIMEOUT_MS = 5_000
 let activeVerifications = 0
 
 function acquireVerificationSlot(): () => void {
@@ -52,6 +54,27 @@ export function classifyDownloadBytes(byteSize: number): DownloadByteClass {
   if (byteSize < 1024 * 1024) return "under_1_mib"
   if (byteSize < 10 * 1024 * 1024) return "under_10_mib"
   return "at_least_10_mib"
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(DOWNLOAD_ERROR)),
+          timeoutMs,
+        )
+        timeout.unref()
+      }),
+    ])
+  } finally {
+    if (timeout !== null) clearTimeout(timeout)
+  }
 }
 
 function safeFilename(value: string): string {
@@ -101,6 +124,19 @@ export function createAuditedDownloadResponse(
   let streamController: ReadableStreamDefaultController<Uint8Array> | null =
     null
   let consumerCancelled = false
+  let responseErrored = false
+
+  function errorResponse(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+  ): void {
+    if (consumerCancelled || responseErrored) return
+    responseErrored = true
+    try {
+      controller.error(new Error(DOWNLOAD_ERROR))
+    } catch {
+      // A concurrent cancellation or expiry already closed the response.
+    }
+  }
 
   function releaseSlot(): void {
     if (verificationSlotLease !== null) {
@@ -114,7 +150,10 @@ export function createAuditedDownloadResponse(
   async function settle(outcome: DownloadAuditOutcome): Promise<void> {
     if (settled) return
     settled = true
-    await input.complete({ outcome, byteClass })
+    await withTimeout(
+      input.complete({ outcome, byteClass }),
+      AUDIT_COMPLETION_TIMEOUT_MS,
+    )
   }
 
   async function spoolAndVerify(): Promise<readonly Uint8Array[]> {
@@ -122,12 +161,11 @@ export function createAuditedDownloadResponse(
     verificationSlotLease = setTimeout(() => {
       verifiedChunks = []
       releaseSlot()
-      void Promise.allSettled([reader.cancel(), settle("aborted")])
-      try {
-        streamController?.error(new Error(DOWNLOAD_ERROR))
-      } catch {
-        // The response may already have been closed by the consumer.
-      }
+      void Promise.allSettled([
+        withTimeout(reader.cancel(), STORAGE_CANCEL_TIMEOUT_MS),
+        settle("aborted"),
+      ])
+      if (streamController !== null) errorResponse(streamController)
     }, VERIFICATION_SLOT_LEASE_MS)
     const hash = createHash("sha256")
     const chunks: Uint8Array[] = []
@@ -187,23 +225,20 @@ export function createAuditedDownloadResponse(
         await settle("completed")
         controller.close()
       } catch {
-        try {
-          await settle("stream_failed")
-        } catch {
-          // A stale-attempt sweeper provides the durable fallback.
-        }
-        try {
-          await reader.cancel()
-        } catch {
-          // Storage cancellation is best-effort after a safe stream failure.
-        }
-        if (!consumerCancelled) controller.error(new Error(DOWNLOAD_ERROR))
+        void Promise.allSettled([
+          withTimeout(reader.cancel(), STORAGE_CANCEL_TIMEOUT_MS),
+          settle("stream_failed"),
+        ])
+        errorResponse(controller)
       }
     },
 
     async cancel(reason) {
       consumerCancelled = true
-      const storageCancellation = reader.cancel(reason).catch(() => undefined)
+      const storageCancellation = withTimeout(
+        reader.cancel(reason),
+        STORAGE_CANCEL_TIMEOUT_MS,
+      ).catch(() => undefined)
       const auditCompletion = settle("aborted")
       verifiedChunks = []
       releaseSlot()
