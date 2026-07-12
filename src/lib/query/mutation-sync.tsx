@@ -11,6 +11,7 @@ import {
 
 type InvalidationClient = Pick<QueryClient, "clear" | "invalidateQueries">
 type ReplaceLocation = (path: string) => void
+type StopDocument = () => void
 type MutationSyncOptions = Readonly<{ onInvalidate?: () => void }>
 
 const RESOURCE_PATTERN = /^[a-z0-9][a-z0-9:_-]{0,79}$/u
@@ -125,13 +126,18 @@ export function applyClientInvalidation(
   queryClient: InvalidationClient,
   replaceLocation: ReplaceLocation = (path) => window.location.replace(path),
   onInvalidate?: () => void,
+  stopDocument: StopDocument = () => window.stop(),
 ): void {
   const event = readClientInvalidation(value)
   if (event === null || !matchesScope(event.scope, scope)) return
 
   if (event.type === "session-ended") {
     queryClient.clear()
-    replaceLocation("/login")
+    try {
+      stopDocument()
+    } finally {
+      replaceLocation("/login")
+    }
     return
   }
 

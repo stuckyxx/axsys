@@ -12,7 +12,9 @@ export default defineConfig({
   forbidOnly: isCI,
   failOnFlakyTests: isCI,
   retries: isCI ? 2 : 0,
-  workers: isCI ? 1 : undefined,
+  // Local E2E fixtures mutate one shared Supabase stack and exercise Realtime.
+  // Serial workers keep destructive lifecycles deterministic just like CI.
+  workers: 1,
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
     baseURL,

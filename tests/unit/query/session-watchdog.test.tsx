@@ -57,16 +57,19 @@ function WatchdogProbe({
   refresh,
   replace,
   scope = SCOPE,
+  stopDocument,
 }: Readonly<{
   client: ReturnType<typeof createTestQueryClient>
   refresh: () => void
   replace?: (path: string) => void
   scope?: QueryScope
+  stopDocument?: () => void
 }>) {
   useSessionWatchdog(scope, client, {
     refresh,
     senderId: "watchdog-tab-a",
     ...(replace ? { replaceLocation: replace } : {}),
+    ...(stopDocument ? { stopDocument } : {}),
   })
   return null
 }
@@ -154,12 +157,21 @@ describe("Task 16 authenticated session watchdog", () => {
     const clear = vi.spyOn(client, "clear")
     const refresh = vi.fn()
     const replace = vi.fn()
+    const stopDocument = vi.fn()
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response))
 
-    render(<WatchdogProbe client={client} refresh={refresh} replace={replace} />)
+    render(
+      <WatchdogProbe
+        client={client}
+        refresh={refresh}
+        replace={replace}
+        stopDocument={stopDocument}
+      />,
+    )
 
     await waitFor(() => expect(replace).toHaveBeenCalledWith("/login"))
     expect(clear).toHaveBeenCalledTimes(1)
+    expect(stopDocument).toHaveBeenCalledOnce()
     expect(refresh).not.toHaveBeenCalled()
     expect(FakeBroadcastChannel.messages).toEqual([
       {

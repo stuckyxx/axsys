@@ -15,6 +15,7 @@ type SessionWatchdogOptions = Readonly<{
   refresh: () => void
   replaceLocation?: (path: string) => void
   senderId: string
+  stopDocument?: () => void
 }>
 
 const UUID_PATTERN =
@@ -23,6 +24,10 @@ const MODULES = new Set(["administrative", "certificates", "financial"])
 
 function replaceDocumentLocation(path: string): void {
   window.location.replace(path)
+}
+
+function stopCurrentDocument(): void {
+  window.stop()
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -129,6 +134,7 @@ export function useSessionWatchdog(
     refresh,
     replaceLocation = replaceDocumentLocation,
     senderId,
+    stopDocument = stopCurrentDocument,
   }: SessionWatchdogOptions,
 ): () => Promise<void> {
   const controller = useRef<AbortController | null>(null)
@@ -147,9 +153,13 @@ export function useSessionWatchdog(
         type: "session-ended",
       })
     } finally {
-      replaceLocation("/login")
+      try {
+        stopDocument()
+      } finally {
+        replaceLocation("/login")
+      }
     }
-  }, [queryClient, replaceLocation, scope, senderId])
+  }, [queryClient, replaceLocation, scope, senderId, stopDocument])
 
   const revalidate = useCallback((): Promise<void> => {
     if (ended.current) return Promise.resolve()

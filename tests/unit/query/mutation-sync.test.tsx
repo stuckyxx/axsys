@@ -254,15 +254,22 @@ describe("Task 16 mutation synchronization", () => {
     const client = createTestQueryClient()
     const clear = vi.spyOn(client, "clear")
     const replace = vi.fn()
+    const stopDocument = vi.fn()
 
     applyClientInvalidation(
       invalidation({ type: "session-ended", resources: [] }),
       SCOPE,
       client,
       replace,
+      undefined,
+      stopDocument,
     )
 
     expect(clear).toHaveBeenCalledTimes(1)
+    expect(stopDocument).toHaveBeenCalledOnce()
     expect(replace).toHaveBeenCalledWith("/login")
+    expect(stopDocument.mock.invocationCallOrder[0]).toBeLessThan(
+      replace.mock.invocationCallOrder[0]!,
+    )
   })
 })

@@ -463,31 +463,52 @@ describe("Task 14 authentication forms", () => {
   })
 })
 
-describe("Task 14 server-first page guards", () => {
+describe("Task 14 public page guards", () => {
   it.each([
-    [
-      { status: "password_change", userId: "user-id", expired: false },
-      "/change-password",
-    ],
-    [
-      { status: "authenticated", context: { kind: "platform" } },
-      "/platform",
-    ],
-    [
-      { status: "authenticated", context: { kind: "company" } },
-      "/app/dashboard",
-    ],
-  ])("redirects an existing login context to %s", async (resolution, target) => {
-    mocks.getAccessContext.mockResolvedValueOnce(resolution)
+    [{ kind: "platform" }, "/platform"],
+    [{ kind: "company" }, "/app/dashboard"],
+  ])("redirects an existing safe context to %s", async (body, target) => {
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json(body))
 
-    await expect(LoginPage()).rejects.toThrow(`REDIRECT:${target}`)
+    render(<LoginPage />)
+    await waitFor(() => expect(mocks.portalNavigate).toHaveBeenCalledWith(target))
+    expect(fetch).toHaveBeenCalledWith("/api/auth/me", {
+      cache: "no-store",
+      credentials: "same-origin",
+      redirect: "error",
+      signal: expect.any(AbortSignal),
+    })
   })
 
-  it("renders login only for an anonymous context", async () => {
-    mocks.getAccessContext.mockResolvedValueOnce({ status: "anonymous" })
+  it("redirects a provisional-password session without serializing it in Flight", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json(
+        { error: { code: "PASSWORD_CHANGE_REQUIRED" } },
+        { status: 403 },
+      ),
+    )
 
-    render(await LoginPage())
+    render(<LoginPage />)
+    await waitFor(() =>
+      expect(mocks.portalNavigate).toHaveBeenCalledWith("/change-password"),
+    )
+  })
+
+  it("renders login and does not redirect an anonymous or malformed response", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json({ error: { code: "AUTH_REQUIRED" } }, { status: 401 }),
+    )
+
+    render(<LoginPage />)
     expect(screen.getByRole("heading", { name: "Acesse sua conta" })).toBeVisible()
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+    expect(mocks.portalNavigate).not.toHaveBeenCalled()
+
+    const source = readFileSync(
+      resolve("src/app/(public)/login/page.tsx"),
+      "utf8",
+    )
+    expect(source).not.toContain("getAccessContext")
   })
 
   it("fails closed when reset-password has no verified recovery AMR", async () => {

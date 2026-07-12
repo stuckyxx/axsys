@@ -95,6 +95,22 @@ function expectNoStore(response: Response): void {
   }
 }
 
+function expectDeletionCookie(
+  response: Response,
+  name: string,
+  sameSite: "Lax" | "Strict",
+): void {
+  const header = response.headers
+    .getSetCookie()
+    .find((candidate) => candidate.startsWith(`${name}=`))
+  expect(header).toBeDefined()
+  expect(header).toContain("Max-Age=0")
+  expect(header).toContain("Path=/")
+  expect(header).toContain("HttpOnly")
+  expect(header).toContain("Secure")
+  expect(header).toContain(`SameSite=${sameSite}`)
+}
+
 function authenticatedContext() {
   return {
     status: "authenticated" as const,
@@ -243,6 +259,8 @@ describe("Task 11 logout route", () => {
     expect(mocks.assertMutationOrigin).not.toHaveBeenCalled()
     expect(mocks.assertCsrf).not.toHaveBeenCalled()
     expect(mocks.revokeSessionsAndWriteLogout).not.toHaveBeenCalled()
+    expectDeletionCookie(response, "sb-project-auth-token", "Lax")
+    expectDeletionCookie(response, "__Host-axsys-csrf", "Strict")
   })
 
   it("commits app revocation before upstream signout and clears auth/CSRF cookies", async () => {
@@ -266,6 +284,49 @@ describe("Task 11 logout route", () => {
     expect(mocks.cookieDelete).toHaveBeenCalledWith("sb-project-auth-token")
     expect(mocks.cookieDelete).toHaveBeenCalledWith("__Host-axsys-csrf")
     expect(mocks.cookieDelete).not.toHaveBeenCalledWith("unrelated")
+    expectDeletionCookie(response, "sb-project-auth-token", "Lax")
+    expectDeletionCookie(response, "__Host-axsys-csrf", "Strict")
+    expect(response.headers.getSetCookie()).toHaveLength(2)
+  })
+
+  it("expires every Auth chunk and verifier once without reflecting unsafe cookie names", async () => {
+    mocks.cookieGetAll.mockReturnValue([
+      { name: "sb-project-auth-token.0", value: "chunk-zero" },
+      { name: "sb-project-auth-token.1", value: "chunk-one" },
+      {
+        name: "sb-project-auth-token-code-verifier",
+        value: "code-verifier",
+      },
+      { name: "sb-project-auth-token.0", value: "duplicate-chunk" },
+      { name: "__Host-axsys-csrf", value: CSRF },
+      { name: "unrelated", value: "keep" },
+      {
+        name: "sb-project-auth-token\r\nInjected-Cookie",
+        value: "reject",
+      },
+    ])
+
+    const response = await logoutRoute.POST(
+      request("/api/auth/logout", { method: "POST" }),
+    )
+    const deletionNames = response.headers.getSetCookie().map((header) =>
+      header.slice(0, header.indexOf("=")),
+    )
+
+    expect(response.status).toBe(204)
+    expect(deletionNames.sort()).toEqual([
+      "__Host-axsys-csrf",
+      "sb-project-auth-token-code-verifier",
+      "sb-project-auth-token.0",
+      "sb-project-auth-token.1",
+    ])
+    expect(mocks.cookieDelete).not.toHaveBeenCalledWith("unrelated")
+    expect(mocks.cookieDelete).not.toHaveBeenCalledWith(
+      "sb-project-auth-token\r\nInjected-Cookie",
+    )
+    expect(response.headers.getSetCookie().join("\n")).not.toContain(
+      "Injected-Cookie",
+    )
   })
 
   it("does not acknowledge logout or clear cookies when revocation fails", async () => {
@@ -281,6 +342,7 @@ describe("Task 11 logout route", () => {
     expectNoStore(response)
     expect(mocks.signOut).not.toHaveBeenCalled()
     expect(mocks.cookieDelete).not.toHaveBeenCalled()
+    expect(response.headers.getSetCookie()).toHaveLength(0)
   })
 
   it("still acknowledges the committed revocation if Auth signout is unavailable", async () => {
@@ -293,6 +355,8 @@ describe("Task 11 logout route", () => {
     expect(response.status).toBe(204)
     expect(mocks.cookieDelete).toHaveBeenCalledWith("sb-project-auth-token")
     expect(mocks.cookieDelete).toHaveBeenCalledWith("__Host-axsys-csrf")
+    expectDeletionCookie(response, "sb-project-auth-token", "Lax")
+    expectDeletionCookie(response, "__Host-axsys-csrf", "Strict")
   })
 
   it("fails closed when claims verification itself is unavailable", async () => {

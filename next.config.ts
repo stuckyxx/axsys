@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  experimental: {
+    reactDebugChannel: false,
+    serverComponentsHmrCache: false,
+  },
 };
 
 export default nextConfig;
