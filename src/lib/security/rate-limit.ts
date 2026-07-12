@@ -15,6 +15,7 @@ export type RateLimitBucket =
   | "reauth-account-failure"
   | "forgot-ip-volume"
   | "forgot-account-volume"
+  | "file-mutation-user"
 
 export type AccountFailureRateLimitBucket =
   | "login-account-failure"
@@ -58,6 +59,11 @@ const RATE_LIMIT_POLICIES = Object.freeze({
     limit: 3,
     windowSeconds: 3_600,
     blockSeconds: 3_600,
+  }),
+  "file-mutation-user": Object.freeze({
+    limit: 20,
+    windowSeconds: 60,
+    blockSeconds: 60,
   }),
 } satisfies Record<RateLimitBucket, RateLimitPolicy>)
 

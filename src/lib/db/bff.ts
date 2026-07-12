@@ -2,6 +2,11 @@ import "server-only"
 
 import postgres, { type Sql } from "postgres"
 import { getServerEnv } from "@/lib/env/server"
+import type {
+  FileFinalizationState,
+  FileObject,
+  UploadReservationDTO,
+} from "@/modules/files/domain/file-types"
 
 const BFF_DATABASE_FAILURE = "BFF database unavailable"
 const BFF_METADATA_FAILURE = "Invalid BFF metadata"
@@ -101,12 +106,6 @@ type ImageUploadPurpose =
   | "profile_avatar"
   | "company_letterhead"
   | "company_signature"
-
-type UploadReservation = {
-  intentId: string
-  quarantinePath: string
-  declaredSize: number
-}
 
 type UploadAuthorization = {
   uploadAuthorizationExpiresAt: string
@@ -423,9 +422,9 @@ export const bffDb = {
     declaredName: string
     declaredMime: string
     declaredSize: number
-  }): Promise<UploadReservation> {
+  }): Promise<UploadReservationDTO> {
     const sql = await getSql()
-    const [row] = await sql<[{ reservation: UploadReservation }]>`
+    const [row] = await sql<[{ reservation: UploadReservationDTO }]>`
       select private.reserve_image_upload_intent(
         ${input.actorUserId}::uuid,
         ${input.sessionId}::uuid,
@@ -465,6 +464,127 @@ export const bffDb = {
         ${input.actorUserId}::uuid,
         ${input.sessionId}::uuid,
         ${input.intentId}::uuid
+      )
+    `
+  },
+
+  async beginFileFinalization(input: {
+    actorUserId: string
+    sessionId: string
+    intentId: string
+  }): Promise<FileFinalizationState> {
+    const sql = await getSql()
+    const [row] = await sql<[{ state: FileFinalizationState }]>`
+      select private.internal_begin_file_finalization(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.intentId}::uuid
+      ) as state
+    `
+    return row.state
+  },
+
+  async finalizeFileUpload(input: {
+    actorUserId: string
+    sessionId: string
+    intentId: string
+    fileId: string
+    objectPath: string
+    detectedMime: string
+    finalExtension: string
+    byteSize: number
+    sha256: string
+    correlationId: string
+  }): Promise<FileObject> {
+    const sql = await getSql()
+    const [row] = await sql<
+      (Omit<FileObject, "createdAt" | "promotedAt"> & {
+        createdAt: Date
+        promotedAt: Date | null
+      })[]
+    >`
+      select file_object.id,
+             file_object.company_id as "companyId",
+             file_object.owner_user_id as "ownerUserId",
+             file_object.purpose,
+             file_object.bucket,
+             file_object.object_path as "objectPath",
+             file_object.original_name as "originalName",
+             file_object.detected_mime as "detectedMime",
+             file_object.byte_size::double precision as "byteSize",
+             file_object.sha256,
+             file_object.scan_status as "scanStatus",
+             file_object.status,
+             file_object.created_by as "createdBy",
+             file_object.created_at as "createdAt",
+             file_object.promoted_at as "promotedAt"
+      from private.internal_finalize_file_upload(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.intentId}::uuid,
+        ${input.fileId}::uuid,
+        ${input.objectPath},
+        ${input.detectedMime},
+        ${input.finalExtension},
+        ${input.byteSize}::bigint,
+        ${input.sha256},
+        ${input.correlationId}::uuid
+      ) file_object
+    `
+    return Object.freeze({
+      ...row,
+      createdAt: row.createdAt.toISOString(),
+      promotedAt: row.promotedAt?.toISOString() ?? null,
+    })
+  },
+
+  async rejectFileUpload(input: {
+    actorUserId: string
+    sessionId: string
+    intentId: string
+    reasonCode: string
+  }): Promise<void> {
+    const sql = await getSql()
+    await sql`
+      select private.internal_reject_file_upload(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.intentId}::uuid,
+        ${input.reasonCode}
+      )
+    `
+  },
+
+  async releaseFileFinalizationForRetry(input: {
+    actorUserId: string
+    sessionId: string
+    intentId: string
+    reasonCode: string
+  }): Promise<void> {
+    const sql = await getSql()
+    await sql`
+      select private.internal_release_file_finalization_for_retry(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.intentId}::uuid,
+        ${input.reasonCode}
+      )
+    `
+  },
+
+  async markFileCleanupRequired(input: {
+    actorUserId: string
+    sessionId: string
+    intentId: string
+    reasonCode: string
+  }): Promise<void> {
+    const sql = await getSql()
+    await sql`
+      select private.internal_mark_file_cleanup_required(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.intentId}::uuid,
+        ${input.reasonCode}
       )
     `
   },

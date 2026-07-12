@@ -4,24 +4,16 @@ import type { AccessContext } from "@/modules/auth/domain/access-context"
 import { ApiError } from "@/lib/http/api-error"
 import type {
   EnabledImagePurpose,
+  FileFinalizationState,
   FileObject,
+  FinalizableUploadIntent,
 } from "@/modules/files/domain/file-types"
 import { getUploadPolicy, validateFile } from "@/modules/files/domain/upload-policy"
 import type { MalwareScanner } from "@/modules/files/server/clamav-client"
 
-type CompanyAccessContext = Extract<AccessContext, { kind: "company" }>
+export type { FinalizableUploadIntent } from "@/modules/files/domain/file-types"
 
-export type FinalizableUploadIntent = Readonly<{
-  id: string
-  companyId: string
-  actorUserId: string
-  purpose: EnabledImagePurpose
-  quarantinePath: string
-  declaredName: string
-  declaredMime: string
-  declaredSize: number
-  cleanupNotBefore: string
-}>
+type CompanyAccessContext = Extract<AccessContext, { kind: "company" }>
 
 type FinalizationCommand = Readonly<{
   actorUserId: string
@@ -50,10 +42,7 @@ type CleanupReason =
 export type FileFinalizationRepository = Readonly<{
   beginFinalization(
     input: FinalizationCommand & { now: string },
-  ): Promise<
-    | Readonly<{ kind: "ready"; file: FileObject }>
-    | Readonly<{ kind: "finalizing"; intent: FinalizableUploadIntent }>
-  >
+  ): Promise<FileFinalizationState>
   commitReadyFile(input: {
     actorUserId: string
     sessionId: string

@@ -33,6 +33,22 @@ export type FileObject = Readonly<{
   promotedAt: string | null
 }>
 
+export type FinalizableUploadIntent = Readonly<{
+  id: string
+  companyId: string
+  actorUserId: string
+  purpose: EnabledImagePurpose
+  quarantinePath: string
+  declaredName: string
+  declaredMime: string
+  declaredSize: number
+  cleanupNotBefore: string
+}>
+
+export type FileFinalizationState =
+  | Readonly<{ kind: "ready"; file: FileObject }>
+  | Readonly<{ kind: "finalizing"; intent: FinalizableUploadIntent }>
+
 export type UploadReservationDTO = Readonly<{
   intentId: string
   quarantinePath: string

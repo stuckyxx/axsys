@@ -471,7 +471,7 @@ describe("CSRF token route", () => {
 })
 
 describe("rate-limit policy boundary", () => {
-  it("exports only the six frozen bucket literals through a two-argument consume API", () => {
+  it("exports only the seven frozen bucket literals through a two-argument consume API", () => {
     expectTypeOf<RateLimitBucket>().toEqualTypeOf<
       | "login-ip-volume"
       | "login-account-failure"
@@ -479,6 +479,7 @@ describe("rate-limit policy boundary", () => {
       | "reauth-account-failure"
       | "forgot-ip-volume"
       | "forgot-account-volume"
+      | "file-mutation-user"
     >()
     expectTypeOf<Parameters<typeof consumeRateLimit>>().toEqualTypeOf<
       [bucket: RateLimitBucket, rawKey: string]

@@ -119,13 +119,14 @@ select results_eq(
     from private.rate_limit_policies
     order by bucket$$,
   $$values
+    ('file-mutation-user', 20, 60, 60, false),
     ('forgot-account-volume', 3, 3600, 3600, false),
     ('forgot-ip-volume', 10, 900, 3600, false),
     ('login-account-failure', 5, 900, 900, true),
     ('login-ip-volume', 30, 900, 1800, false),
     ('reauth-account-failure', 5, 900, 900, true),
     ('reauth-ip-volume', 20, 900, 1800, false)$$,
-  'policies de rate limit contêm exatamente as seis tuplas congeladas'
+  'policies de rate limit contêm exatamente as sete tuplas congeladas'
 );
 select results_eq(
   $$select namespace.nspname::text collate "default",
@@ -696,6 +697,11 @@ select results_eq(
     ('private.fail_closed_login_session(uuid,uuid,text,uuid)'),
     ('private.fail_password_recovery(uuid,text,uuid)'),
     ('private.fail_temporary_password_reset(uuid,uuid,uuid,text,uuid)'),
+    ('private.internal_begin_file_finalization(uuid,uuid,uuid)'),
+    ('private.internal_finalize_file_upload(uuid,uuid,uuid,uuid,text,text,text,bigint,text,uuid)'),
+    ('private.internal_mark_file_cleanup_required(uuid,uuid,uuid,text)'),
+    ('private.internal_reject_file_upload(uuid,uuid,uuid,text)'),
+    ('private.internal_release_file_finalization_for_retry(uuid,uuid,uuid,text)'),
     ('private.list_company_user_directory(uuid,uuid,uuid,integer,text)'),
     ('private.register_auth_session(uuid,uuid,boolean)'),
     ('private.reserve_image_upload_intent(uuid,uuid,text,text,text,bigint)'),
@@ -703,7 +709,7 @@ select results_eq(
     ('private.rotate_app_session_after_reauthentication(uuid,uuid,uuid,uuid)'),
     ('private.write_authenticated_audit_event(uuid,uuid,text,text,uuid,audit_outcome,text,uuid,text,text,jsonb)'),
     ('private.write_security_event(text,uuid,text,text,audit_outcome,text,uuid,jsonb)')$$,
-  'axsys_bff recebe exatamente vinte EXECUTEs efetivos'
+  'axsys_bff recebe exatamente vinte e cinco EXECUTEs efetivos'
 );
 select results_eq(
   $$select role_name::text collate "default",

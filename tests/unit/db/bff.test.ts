@@ -12,10 +12,11 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe("bffDb boundary", () => {
-  it("exports only the twenty typed security-control, password, upload and directory operations", () => {
+  it("exports only the twenty-five typed security-control, password, upload and directory operations", () => {
     expect(Object.keys(bffDb).sort()).toEqual([
       "activateFileUploadAuthorization",
       "assertAuthSession",
+      "beginFileFinalization",
       "beginPasswordRecovery",
       "beginTemporaryPasswordReset",
       "cancelUnissuedFileReservation",
@@ -27,8 +28,12 @@ describe("bffDb boundary", () => {
       "failClosedLoginSession",
       "failPasswordRecovery",
       "failTemporaryPasswordReset",
+      "finalizeFileUpload",
       "listCompanyUserDirectory",
+      "markFileCleanupRequired",
       "registerAuthSession",
+      "rejectFileUpload",
+      "releaseFileFinalizationForRetry",
       "reserveImageUploadIntent",
       "revokeSessionsAndWriteLogout",
       "rotateAppSessionAfterReauthentication",
@@ -254,11 +259,11 @@ describe("bffDb boundary", () => {
       ]
     >()
     expectTypeOf(bffDb.reserveImageUploadIntent).returns.toEqualTypeOf<
-      Promise<{
+      Promise<Readonly<{
         intentId: string
         quarantinePath: string
         declaredSize: number
-      }>
+      }>>
     >()
     expectTypeOf<
       Parameters<typeof bffDb.activateFileUploadAuthorization>
@@ -332,6 +337,11 @@ describe("bffDb boundary", () => {
       "fail_closed_login_session",
       "fail_password_recovery",
       "fail_temporary_password_reset",
+      "internal_begin_file_finalization",
+      "internal_finalize_file_upload",
+      "internal_mark_file_cleanup_required",
+      "internal_reject_file_upload",
+      "internal_release_file_finalization_for_retry",
       "list_company_user_directory",
       "register_auth_session",
       "reserve_image_upload_intent",

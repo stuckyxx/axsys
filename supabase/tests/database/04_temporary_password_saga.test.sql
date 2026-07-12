@@ -165,6 +165,11 @@ select results_eq(
     ('fail_closed_login_session'),
     ('fail_password_recovery'),
     ('fail_temporary_password_reset'),
+    ('internal_begin_file_finalization'),
+    ('internal_finalize_file_upload'),
+    ('internal_mark_file_cleanup_required'),
+    ('internal_reject_file_upload'),
+    ('internal_release_file_finalization_for_retry'),
     ('list_company_user_directory'),
     ('register_auth_session'),
     ('reserve_image_upload_intent'),
@@ -172,7 +177,7 @@ select results_eq(
     ('rotate_app_session_after_reauthentication'),
     ('write_authenticated_audit_event'),
     ('write_security_event')$$,
-  'BFF preserva as boundaries anteriores e recebe somente as quatro fachadas Task 3'
+  'BFF preserva as boundaries anteriores e recebe somente as fachadas Task 4'
 );
 select is_empty(
   $$select role_name || ':' || function.oid::regprocedure::text
