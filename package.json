@@ -28,7 +28,9 @@
     "bootstrap:local": "tsx scripts/bootstrap-local.ts",
     "files:start": "docker compose -f docker-compose.files.yml up -d --wait",
     "files:stop": "docker compose -f docker-compose.files.yml down",
-    "files:logs": "docker compose -f docker-compose.files.yml logs --tail=100 clamav"
+    "files:logs": "docker compose -f docker-compose.files.yml logs --tail=100 clamav",
+    "files:cleanup": "node --conditions=react-server --import tsx scripts/cleanup-expired-uploads.ts",
+    "files:reconcile": "node --conditions=react-server --import tsx scripts/cleanup-expired-uploads.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "5.4.0",

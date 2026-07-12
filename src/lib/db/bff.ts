@@ -96,6 +96,14 @@ async function getSql(): Promise<Sql> {
   return bffSql
 }
 
+function toSafeInteger(value: number | string): number {
+  const parsed = typeof value === "number" ? value : Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new Error(BFF_DATABASE_FAILURE)
+  }
+  return parsed
+}
+
 export type RateLimitDecision = {
   allowed: boolean
   attempts: number
@@ -120,6 +128,30 @@ type CompanyUserDirectoryEntry = {
   status: "active" | "suspended"
   modules: ("administrative" | "financial" | "certificates")[]
   createdAt: string
+}
+
+type RetirementStatus =
+  | "issued"
+  | "finalizing"
+  | "ready"
+  | "rejected"
+  | "expired"
+  | "cleanup_required"
+
+export type UploadAuthorizationRetirementClaim = {
+  intentId: string
+  quarantineObjectPath: string
+  retirementStatus: RetirementStatus
+  claimId: string
+  expectedVersion: number
+}
+
+export type UploadAuthorizationRetirementCompletion = {
+  intentId: string
+  status: RetirementStatus
+  releasedBytes: number
+  version: number
+  authorizationRetiredAt: string
 }
 
 export const bffDb = {
@@ -587,6 +619,96 @@ export const bffDb = {
         ${input.reasonCode}
       )
     `
+  },
+
+  async claimUploadAuthorizationsForRetirement(
+    limit: number,
+    workerId: string,
+  ): Promise<UploadAuthorizationRetirementClaim[]> {
+    const sql = await getSql()
+    const rows = await sql<
+      (Omit<UploadAuthorizationRetirementClaim, "expectedVersion"> & {
+        expectedVersion: number | string
+      })[]
+    >`
+      select intent_id as "intentId",
+             quarantine_object_path as "quarantineObjectPath",
+             retirement_status as "retirementStatus",
+             claim_id as "claimId",
+             expected_version as "expectedVersion"
+      from private.claim_upload_authorizations_for_retirement(
+        ${limit},
+        ${workerId}::uuid
+      )
+    `
+    return rows.map((row) => ({
+      ...row,
+      expectedVersion: toSafeInteger(row.expectedVersion),
+    }))
+  },
+
+  async releaseUploadAuthorizationRetirementClaim(input: {
+    intentId: string
+    claimId: string
+    expectedVersion: number
+    errorCode:
+      | "FILE_QUARANTINE_DELETE_AMBIGUOUS"
+      | "FILE_QUARANTINE_DELETE_FAILED"
+      | "FILE_QUARANTINE_DELETE_UNAVAILABLE"
+  }): Promise<number> {
+    const sql = await getSql()
+    const [row] = await sql<[{ version: number | string }]>`
+      select private.release_upload_authorization_retirement_claim(
+        ${input.intentId}::uuid,
+        ${input.claimId}::uuid,
+        ${input.expectedVersion}::bigint,
+        ${input.errorCode}
+      ) as version
+    `
+    return toSafeInteger(row.version)
+  },
+
+  async completeUploadAuthorizationRetirement(input: {
+    intentId: string
+    claimId: string
+    expectedVersion: number
+  }): Promise<UploadAuthorizationRetirementCompletion> {
+    const sql = await getSql()
+    const [row] = await sql<
+      [{
+        intentId: string
+        status: RetirementStatus
+        releasedBytes: number | string
+        version: number | string
+        authorizationRetiredAt: Date
+      }]
+    >`
+      select intent_id as "intentId",
+             status,
+             released_bytes as "releasedBytes",
+             version,
+             authorization_retired_at as "authorizationRetiredAt"
+      from private.complete_upload_authorization_retirement(
+        ${input.intentId}::uuid,
+        ${input.claimId}::uuid,
+        ${input.expectedVersion}::bigint
+      )
+    `
+    return {
+      ...row,
+      releasedBytes: toSafeInteger(row.releasedBytes),
+      version: toSafeInteger(row.version),
+      authorizationRetiredAt: row.authorizationRetiredAt.toISOString(),
+    }
+  },
+
+  async cancelStaleReservedUploadIntents(limit: number): Promise<number> {
+    const sql = await getSql()
+    const [row] = await sql<[{ cancelled: number | string }]>`
+      select count(*) as cancelled
+      from private.cancel_stale_reserved_upload_intents(${limit})
+    `
+    return toSafeInteger(row.cancelled)
   },
 
   async listCompanyUserDirectory(input: {

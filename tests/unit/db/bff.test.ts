@@ -12,18 +12,21 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe("bffDb boundary", () => {
-  it("exports only the twenty-five typed security-control, password, upload and directory operations", () => {
+  it("exports only the twenty-nine typed security-control, password, upload and directory operations", () => {
     expect(Object.keys(bffDb).sort()).toEqual([
       "activateFileUploadAuthorization",
       "assertAuthSession",
       "beginFileFinalization",
       "beginPasswordRecovery",
       "beginTemporaryPasswordReset",
+      "cancelStaleReservedUploadIntents",
       "cancelUnissuedFileReservation",
+      "claimUploadAuthorizationsForRetirement",
       "clearRateLimit",
       "completePasswordRecovery",
       "completeTemporaryPasswordChange",
       "completeTemporaryPasswordReset",
+      "completeUploadAuthorizationRetirement",
       "consumeRateLimit",
       "failClosedLoginSession",
       "failPasswordRecovery",
@@ -34,6 +37,7 @@ describe("bffDb boundary", () => {
       "registerAuthSession",
       "rejectFileUpload",
       "releaseFileFinalizationForRetry",
+      "releaseUploadAuthorizationRetirementClaim",
       "reserveImageUploadIntent",
       "revokeSessionsAndWriteLogout",
       "rotateAppSessionAfterReauthentication",
@@ -310,6 +314,28 @@ describe("bffDb boundary", () => {
         }[]
       >
     >()
+    expectTypeOf(
+      bffDb.claimUploadAuthorizationsForRetirement,
+    ).returns.toEqualTypeOf<
+      Promise<
+        {
+          intentId: string
+          quarantineObjectPath: string
+          retirementStatus:
+            | "issued"
+            | "finalizing"
+            | "ready"
+            | "rejected"
+            | "expired"
+            | "cleanup_required"
+          claimId: string
+          expectedVersion: number
+        }[]
+      >
+    >()
+    expectTypeOf(
+      bffDb.cancelStaleReservedUploadIntents,
+    ).returns.toEqualTypeOf<Promise<number>>()
   })
 
   it("keeps the SQL client private and uses static private function names", () => {
@@ -328,11 +354,14 @@ describe("bffDb boundary", () => {
       "assert_auth_session",
       "begin_password_recovery",
       "begin_temporary_password_reset",
+      "cancel_stale_reserved_upload_intents",
       "cancel_unissued_file_reservation",
+      "claim_upload_authorizations_for_retirement",
       "clear_rate_limit",
       "complete_password_recovery",
       "complete_temporary_password_change",
       "complete_temporary_password_reset",
+      "complete_upload_authorization_retirement",
       "consume_rate_limit",
       "fail_closed_login_session",
       "fail_password_recovery",
@@ -344,6 +373,7 @@ describe("bffDb boundary", () => {
       "internal_release_file_finalization_for_retry",
       "list_company_user_directory",
       "register_auth_session",
+      "release_upload_authorization_retirement_claim",
       "reserve_image_upload_intent",
       "revoke_sessions_and_write_logout",
       "rotate_app_session_after_reauthentication",
