@@ -119,6 +119,7 @@ select results_eq(
     from private.rate_limit_policies
     order by bucket$$,
   $$values
+    ('file-download-user', 60, 60, 60, false),
     ('file-mutation-user', 20, 60, 60, false),
     ('forgot-account-volume', 3, 3600, 3600, false),
     ('forgot-ip-volume', 10, 900, 3600, false),
@@ -126,7 +127,7 @@ select results_eq(
     ('login-ip-volume', 30, 900, 1800, false),
     ('reauth-account-failure', 5, 900, 900, true),
     ('reauth-ip-volume', 20, 900, 1800, false)$$,
-  'policies de rate limit contêm exatamente as sete tuplas congeladas'
+  'policies de rate limit contêm exatamente as oito tuplas congeladas'
 );
 select results_eq(
   $$select namespace.nspname::text collate "default",
@@ -414,6 +415,8 @@ select results_eq(
       'CHECK ((window_seconds > 0))'),
     ('public','audit_events','audit_events_action_format',
       E'CHECK ((action ~ ''^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$''::text))'),
+    ('public','audit_events','audit_events_actor_presence',
+      'CHECK (((actor_user_id IS NOT NULL) OR ((action = ''file.download''::text) AND ((metadata ->> ''accessKind''::text) = ''public''::text))))'),
     ('public','audit_events','audit_events_actor_user_id_fkey',
       'FOREIGN KEY (actor_user_id) REFERENCES profiles(user_id) ON DELETE RESTRICT'),
     ('public','audit_events','audit_events_company_id_fkey',
@@ -686,12 +689,14 @@ select results_eq(
   $$values
     ('private.activate_file_upload_authorization(uuid,uuid,uuid)'),
     ('private.assert_auth_session(uuid,uuid)'),
+    ('private.authorize_image_file_download(uuid,uuid,uuid,uuid)'),
     ('private.begin_password_recovery(text,uuid)'),
     ('private.begin_temporary_password_reset(uuid,uuid,uuid,uuid)'),
     ('private.cancel_stale_reserved_upload_intents(integer)'),
     ('private.cancel_unissued_file_reservation(uuid,uuid,uuid)'),
     ('private.claim_upload_authorizations_for_retirement(integer,uuid)'),
     ('private.clear_rate_limit(text,text)'),
+    ('private.complete_download_audit(uuid,text,text,text)'),
     ('private.complete_password_recovery(uuid,uuid)'),
     ('private.complete_temporary_password_change(uuid,uuid,uuid)'),
     ('private.complete_temporary_password_reset(uuid,uuid,uuid,uuid)'),
@@ -713,7 +718,7 @@ select results_eq(
     ('private.rotate_app_session_after_reauthentication(uuid,uuid,uuid,uuid)'),
     ('private.write_authenticated_audit_event(uuid,uuid,text,text,uuid,audit_outcome,text,uuid,text,text,jsonb)'),
     ('private.write_security_event(text,uuid,text,text,audit_outcome,text,uuid,jsonb)')$$,
-  'axsys_bff recebe exatamente vinte e nove EXECUTEs efetivos'
+  'axsys_bff recebe exatamente trinta e um EXECUTEs efetivos'
 );
 select results_eq(
   $$select role_name::text collate "default",

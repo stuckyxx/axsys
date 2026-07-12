@@ -733,7 +733,7 @@ describe("axsys_bff", () => {
     ])
   })
 
-  it("has EXECUTE on all and only the twenty-nine allowlisted boundaries", async () => {
+  it("has EXECUTE on all and only the thirty-one allowlisted boundaries", async () => {
     const routines = await postgresOwnerSql<{ routineName: string }[]>`
       select function.proname as "routineName"
       from pg_proc function
@@ -746,12 +746,14 @@ describe("axsys_bff", () => {
     expect(routines.map(({ routineName }) => routineName)).toEqual([
       "activate_file_upload_authorization",
       "assert_auth_session",
+      "authorize_image_file_download",
       "begin_password_recovery",
       "begin_temporary_password_reset",
       "cancel_stale_reserved_upload_intents",
       "cancel_unissued_file_reservation",
       "claim_upload_authorizations_for_retirement",
       "clear_rate_limit",
+      "complete_download_audit",
       "complete_password_recovery",
       "complete_temporary_password_change",
       "complete_temporary_password_reset",
