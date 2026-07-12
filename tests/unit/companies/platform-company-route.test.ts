@@ -58,6 +58,19 @@ const validInput = {
   },
 }
 
+function companyCreationRequest(idempotencyKey: string): Request {
+  return new Request("https://axsys.test/api/platform/companies", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      origin: "https://axsys.test",
+      "x-csrf-token": "csrf-cookie",
+      "idempotency-key": idempotencyKey,
+    },
+    body: JSON.stringify(validInput),
+  })
+}
+
 beforeEach(() => {
   mocks.cookies.mockResolvedValue({
     get: vi.fn(() => ({ value: "csrf-cookie" })),
@@ -135,4 +148,68 @@ describe("platform company creation route", () => {
     expect(response.status).toBe(429)
     expect(mocks.provision).not.toHaveBeenCalled()
   })
+
+  it("maps an idempotency key reused for another request to a neutral conflict", async () => {
+    mocks.provision.mockRejectedValue(
+      Object.assign(new Error("AXSYS_IDEMPOTENCY_KEY_REUSED"), {
+        code: "P0001",
+      }),
+    )
+
+    const response = await POST(companyCreationRequest("company-create-2026-0004"))
+
+    expect(response.status).toBe(409)
+    expect(response.headers.get("cache-control")).toContain("no-store")
+    const body = await response.json()
+    expect(body).toMatchObject({
+      error: {
+        code: "IDEMPOTENCY_KEY_REUSED",
+        correlationId: expect.any(String),
+      },
+    })
+    expect(JSON.stringify(body)).not.toContain("AXSYS_")
+  })
+
+  it("maps a duplicate company to the neutral company conflict", async () => {
+    mocks.provision.mockRejectedValue(
+      Object.assign(new Error("duplicate key value exposes private constraint"), {
+        code: "23505",
+      }),
+    )
+
+    const response = await POST(companyCreationRequest("company-create-2026-0005"))
+
+    expect(response.status).toBe(409)
+    const body = await response.json()
+    expect(body).toMatchObject({
+      error: {
+        code: "COMPANY_CONFLICT",
+        correlationId: expect.any(String),
+      },
+    })
+    expect(JSON.stringify(body)).not.toContain("constraint")
+  })
+
+  it.each(["email_exists", "user_already_exists", "identity_already_exists"])(
+    "maps the Auth identity conflict %s to the same neutral company conflict",
+    async (code) => {
+      mocks.provision.mockRejectedValue(
+        Object.assign(new Error("Auth account existence detail"), { code }),
+      )
+
+      const response = await POST(
+        companyCreationRequest(`company-create-2026-${code}`),
+      )
+
+      expect(response.status).toBe(409)
+      const body = await response.json()
+      expect(body).toMatchObject({
+        error: {
+          code: "COMPANY_CONFLICT",
+          correlationId: expect.any(String),
+        },
+      })
+      expect(JSON.stringify(body)).not.toContain("Auth account")
+    },
+  )
 })

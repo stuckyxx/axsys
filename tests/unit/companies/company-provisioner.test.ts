@@ -98,6 +98,41 @@ describe("company provisioner", () => {
     })
   })
 
+  it("returns a neutral company conflict when the Auth identity already exists", async () => {
+    const deps = fixture()
+    deps.auth.createUser.mockRejectedValue(
+      Object.assign(new Error("private Auth identity detail"), {
+        code: "user_already_exists",
+      }),
+    )
+
+    await expect(
+      provisionCompany({ ...deps, fingerprint: vi.fn(() => "f".repeat(64)) }, command),
+    ).rejects.toMatchObject({ code: "COMPANY_CONFLICT", status: 409 })
+    expect(deps.repository.commit).not.toHaveBeenCalled()
+    expect(deps.auth.deleteUser).not.toHaveBeenCalled()
+  })
+
+  it("compensates Auth before returning a neutral duplicate-company conflict", async () => {
+    const deps = fixture()
+    deps.repository.commit.mockRejectedValue(
+      Object.assign(new Error("private unique constraint detail"), {
+        code: "23505",
+      }),
+    )
+
+    await expect(
+      provisionCompany({ ...deps, fingerprint: vi.fn(() => "1".repeat(64)) }, command),
+    ).rejects.toMatchObject({ code: "COMPANY_CONFLICT", status: 409 })
+    expect(deps.auth.deleteUser).toHaveBeenCalledWith(deps.authUserId)
+    expect(deps.repository.markCompensated).toHaveBeenCalledWith({
+      operationId: deps.operationId,
+      actorUserId: command.actorUserId,
+      sessionId: command.sessionId,
+      reason: "DB_COMMIT_FAILED",
+    })
+  })
+
   it("replays a committed operation without creating another Auth user", async () => {
     const deps = fixture()
     deps.repository.reserve.mockResolvedValue({

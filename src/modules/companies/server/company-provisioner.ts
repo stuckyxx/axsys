@@ -79,6 +79,30 @@ function provisioningError(code: string): ApiError {
   return new ApiError(code, 503, "Não foi possível provisionar a empresa.")
 }
 
+function companyConflictError(): ApiError {
+  return new ApiError(
+    "COMPANY_CONFLICT",
+    409,
+    "Não foi possível criar a empresa com os dados informados.",
+  )
+}
+
+function externalErrorCode(error: unknown): string | null {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return null
+  }
+  return typeof error.code === "string" ? error.code : null
+}
+
+function isNeutralCompanyConflict(error: unknown): boolean {
+  return [
+    "23505",
+    "email_exists",
+    "identity_already_exists",
+    "user_already_exists",
+  ].includes(externalErrorCode(error) ?? "")
+}
+
 function requestFingerprint(
   deps: CompanyProvisioningDependencies,
   input: CreateCompanyInput,
@@ -105,6 +129,7 @@ async function compensateAuthUser(
   authUserId: string,
   actorUserId: string,
   sessionId: string,
+  terminalError: ApiError = provisioningError("COMPANY_CREATE_FAILED"),
 ): Promise<never> {
   try {
     await deps.auth.deleteUser(authUserId)
@@ -114,7 +139,7 @@ async function compensateAuthUser(
       sessionId,
       reason: "DB_COMMIT_FAILED",
     })
-    throw provisioningError("COMPANY_CREATE_FAILED")
+    throw terminalError
   } catch (error) {
     if (error instanceof ApiError) throw error
     try {
@@ -169,7 +194,8 @@ export async function provisionCompany(
         password: input.firstAdmin.temporaryPassword,
         emailConfirm: true,
       })
-    } catch {
+    } catch (error) {
+      if (isNeutralCompanyConflict(error)) throw companyConflictError()
       throw provisioningError("COMPANY_CREATE_FAILED")
     }
     authUserId = created.id
@@ -208,13 +234,16 @@ export async function provisionCompany(
       company,
       firstAdmin: safeFirstAdmin,
     })
-  } catch {
+  } catch (error) {
     return compensateAuthUser(
       deps,
       operation.id,
       authUserId,
       command.actorUserId,
       command.sessionId,
+      isNeutralCompanyConflict(error)
+        ? companyConflictError()
+        : provisioningError("COMPANY_CREATE_FAILED"),
     )
   }
 }

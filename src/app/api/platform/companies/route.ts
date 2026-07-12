@@ -1,6 +1,7 @@
 import { cookies } from "next/headers"
 
 import { z } from "@/lib/validation/zod"
+import { ApiError } from "@/lib/http/api-error"
 import { getCorrelationId } from "@/lib/http/correlation-id"
 import { toErrorResponse } from "@/lib/http/error-response"
 import { assertCsrf, CSRF_COOKIE_NAME } from "@/lib/security/csrf"
@@ -19,6 +20,43 @@ const idempotencyKeySchema = z
   .min(16)
   .max(128)
   .regex(/^[\u0021-\u007e]+$/u)
+
+const AUTH_IDENTITY_CONFLICT_CODES = new Set([
+  "email_exists",
+  "identity_already_exists",
+  "user_already_exists",
+])
+
+function errorProperty(error: unknown, property: "code" | "message"): string | null {
+  if (typeof error !== "object" || error === null || !(property in error)) {
+    return null
+  }
+  const value = (error as Record<string, unknown>)[property]
+  return typeof value === "string" ? value : null
+}
+
+function mapCompanyCreationError(error: unknown): unknown {
+  const code = errorProperty(error, "code")
+  const message = errorProperty(error, "message")
+  if (
+    code === "AXSYS_IDEMPOTENCY_KEY_REUSED" ||
+    message === "AXSYS_IDEMPOTENCY_KEY_REUSED"
+  ) {
+    return new ApiError(
+      "IDEMPOTENCY_KEY_REUSED",
+      409,
+      "A chave de idempotência não pode ser reutilizada para esta solicitação.",
+    )
+  }
+  if (code === "23505" || (code !== null && AUTH_IDENTITY_CONFLICT_CODES.has(code))) {
+    return new ApiError(
+      "COMPANY_CONFLICT",
+      409,
+      "Não foi possível criar a empresa com os dados informados.",
+    )
+  }
+  return error
+}
 
 export async function POST(request: Request): Promise<Response> {
   const correlationId = getCorrelationId(request)
@@ -62,6 +100,6 @@ export async function POST(request: Request): Promise<Response> {
     })
     return withNoStore(Response.json(result, { status: 201 }))
   } catch (error) {
-    return toErrorResponse(error, correlationId)
+    return toErrorResponse(mapCompanyCreationError(error), correlationId)
   }
 }
