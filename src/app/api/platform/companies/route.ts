@@ -9,17 +9,40 @@ import { withNoStore } from "@/lib/security/no-store"
 import { assertMutationOrigin } from "@/lib/security/origin"
 import { consumeRateLimit } from "@/lib/security/rate-limit"
 import { requirePlatformApiContext, requireRecentAuthentication } from "@/modules/auth/server/guards"
-import { createCompanySchema } from "@/modules/companies/schemas/company-schemas"
+import {
+  companyListFiltersSchema,
+  createCompanySchema,
+} from "@/modules/companies/schemas/company-schemas"
 import {
   getCompanyProvisioningDependencies,
   provisionCompany,
 } from "@/modules/companies/server/company-provisioner"
+import { listCompanies } from "@/modules/companies/server/company-service"
 
 const idempotencyKeySchema = z
   .string()
   .min(16)
   .max(128)
   .regex(/^[\u0021-\u007e]+$/u)
+
+export async function GET(request: Request): Promise<Response> {
+  const correlationId = getCorrelationId(request)
+  try {
+    const context = await requirePlatformApiContext()
+    const url = new URL(request.url)
+    const filters = companyListFiltersSchema.parse({
+      search: url.searchParams.get("search") ?? undefined,
+      status: url.searchParams.get("status") ?? undefined,
+      cursor: url.searchParams.get("cursor") ?? undefined,
+      limit: url.searchParams.get("limit") ?? undefined,
+    })
+    return withNoStore(
+      Response.json(await listCompanies({ context, ...filters })),
+    )
+  } catch (error) {
+    return toErrorResponse(error, correlationId)
+  }
+}
 
 const AUTH_IDENTITY_CONFLICT_CODES = new Set([
   "email_exists",

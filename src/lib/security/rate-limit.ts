@@ -18,6 +18,7 @@ export type RateLimitBucket =
   | "file-mutation-user"
   | "file-download-user"
   | "platform-company-create"
+  | "platform-company-status"
 
 export type AccountFailureRateLimitBucket =
   | "login-account-failure"
@@ -74,6 +75,11 @@ const RATE_LIMIT_POLICIES = Object.freeze({
   }),
   "platform-company-create": Object.freeze({
     limit: 10,
+    windowSeconds: 3_600,
+    blockSeconds: 3_600,
+  }),
+  "platform-company-status": Object.freeze({
+    limit: 20,
     windowSeconds: 3_600,
     blockSeconds: 3_600,
   }),

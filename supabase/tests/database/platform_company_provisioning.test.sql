@@ -110,6 +110,14 @@ select has_function(
 );
 select has_function(
   'private'::name,
+  'internal_commit_company_provisioning'::name,
+  array[
+    'uuid','uuid','uuid','uuid','uuid','text','text','text',
+    'text','text','text','text','text','public.module_key[]','uuid'
+  ]
+);
+select has_function(
+  'private'::name,
   'internal_mark_provisioning_compensation'::name,
   array['uuid','uuid','uuid','public.provisioning_status','text']
 );
@@ -132,10 +140,14 @@ select results_eq(
         'internal_reserve_company_provisioning',
         'resolve_brazil_timezone'
       )
-    order by function.proname$$,
+    order by function.proname,
+             pg_get_function_identity_arguments(function.oid)$$,
   $$values
     ('internal_commit_company_provisioning',
       'p_operation_id uuid, p_actor_user_id uuid, p_session_id uuid, p_auth_user_id uuid, p_company_id uuid, p_legal_name text, p_trade_name text, p_cnpj_normalized text, p_contact_email citext, p_contact_phone text, p_timezone text, p_admin_display_name text, p_admin_email citext, p_modules module_key[], p_correlation_id uuid',
+      'jsonb','postgres',true,true),
+    ('internal_commit_company_provisioning',
+      'p_operation_id uuid, p_actor_user_id uuid, p_session_id uuid, p_auth_user_id uuid, p_company_id uuid, p_legal_name text, p_trade_name text, p_cnpj_normalized text, p_contact_email text, p_contact_phone text, p_timezone text, p_admin_display_name text, p_admin_email text, p_modules module_key[], p_correlation_id uuid',
       'jsonb','postgres',true,true),
     ('internal_mark_provisioning_auth_created',
       'p_operation_id uuid, p_actor_user_id uuid, p_session_id uuid, p_auth_user_id uuid',
@@ -174,7 +186,7 @@ select results_eq(
       and has_function_privilege('axsys_bff', function.oid, 'EXECUTE')
     order by function.oid::regprocedure::text$$,
   $$values
-    ('private.internal_commit_company_provisioning(uuid,uuid,uuid,uuid,uuid,text,text,text,citext,text,text,text,citext,module_key[],uuid)'),
+    ('private.internal_commit_company_provisioning(uuid,uuid,uuid,uuid,uuid,text,text,text,text,text,text,text,text,module_key[],uuid)'),
     ('private.internal_mark_provisioning_auth_created(uuid,uuid,uuid,uuid)'),
     ('private.internal_mark_provisioning_compensation(uuid,uuid,uuid,provisioning_status,text)'),
     ('private.internal_reserve_company_provisioning(uuid,uuid,text,text,text,uuid)')$$,
@@ -197,17 +209,19 @@ select is_empty(
 );
 select ok(
   has_type_privilege('axsys_bff', 'public.module_key', 'USAGE')
+  and has_type_privilege('axsys_bff', 'public.company_status', 'USAGE')
   and has_type_privilege('axsys_bff', 'public.provisioning_status', 'USAGE')
   and not has_type_privilege('service_role', 'public.module_key', 'USAGE')
+  and not has_type_privilege('service_role', 'public.company_status', 'USAGE')
   and not has_type_privilege('service_role', 'public.provisioning_status', 'USAGE'),
-  'BFF receives only the enum usage needed by typed provisioning calls'
+  'BFF receives only the enum usage needed by typed server boundaries'
 );
 select ok(
   has_schema_privilege('axsys_bff', 'public', 'USAGE')
-  and has_schema_privilege('axsys_bff', 'extensions', 'USAGE')
+  and not has_schema_privilege('axsys_bff', 'extensions', 'USAGE')
   and not has_schema_privilege('axsys_bff', 'public', 'CREATE')
   and not has_schema_privilege('axsys_bff', 'extensions', 'CREATE'),
-  'BFF can resolve the typed arguments without schema creation rights'
+  'BFF resolves public types without extension or schema creation rights'
 );
 select is_empty(
   $$select namespace.nspname, class.relname, grant_item.privilege_type
@@ -377,6 +391,7 @@ create temporary table provisioning_commit_results(
 grant select, insert on provisioning_operation_refs,
   provisioning_commit_results to axsys_bff;
 grant axsys_bff to postgres;
+grant usage on schema extensions to axsys_bff, service_role;
 do $$
 declare
   pgtap_function record;

@@ -465,15 +465,16 @@ select results_eq(
     where namespace.nspname = 'public'
       and type.typname in (
         'file_purpose','file_scan_status','file_status','upload_intent_status',
-        'bank_account_status','bank_account_type','module_key',
+        'bank_account_status','bank_account_type','company_status','module_key',
         'provisioning_kind','provisioning_status'
       )
       and (grant_item.grantee = 0 or grantee.rolname in ('anon','authenticated','service_role','axsys_bff'))
     order by type.typname, coalesce(grantee.rolname, 'PUBLIC'), grant_item.privilege_type$$,
   $$values
+    ('company_status:axsys_bff:USAGE'),
     ('module_key:axsys_bff:USAGE'),
     ('provisioning_status:axsys_bff:USAGE')$$,
-  'enum ACL catalogs expose only the two typed BFF provisioning grants'
+  'enum ACL catalogs expose only the three typed BFF boundary grants'
 );
 
 select results_eq(
@@ -484,15 +485,16 @@ select results_eq(
     where namespace.nspname = 'public'
       and type.typname in (
         'file_purpose','file_scan_status','file_status','upload_intent_status',
-        'bank_account_status','bank_account_type','module_key',
+        'bank_account_status','bank_account_type','company_status','module_key',
         'provisioning_kind','provisioning_status'
       )
       and has_type_privilege(role_name, type.oid, 'USAGE')
     order by role_name, type.typname$$,
   $$values
+    ('axsys_bff:company_status'),
     ('axsys_bff:module_key'),
     ('axsys_bff:provisioning_status')$$,
-  'role inheritance exposes only the two typed BFF provisioning enums'
+  'role inheritance exposes only the three typed BFF boundary enums'
 );
 
 select results_eq(

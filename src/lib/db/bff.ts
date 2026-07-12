@@ -2,6 +2,7 @@ import "server-only"
 
 import postgres, { type Sql } from "postgres"
 import { getServerEnv } from "@/lib/env/server"
+import { z } from "@/lib/validation/zod"
 import type {
   FileFinalizationState,
   FileObject,
@@ -187,6 +188,115 @@ export type ProvisionedCompanySnapshot = {
   membership: { id: string; role: "company_admin" }
   modules: ("administrative" | "financial" | "certificates")[]
 }
+
+export type ManagedCompanySnapshot = {
+  id: string
+  legalName: string
+  tradeName: string | null
+  cnpj: string
+  contactEmail: string
+  contactPhone: string | null
+  timezone: string
+  status: "active" | "archived"
+  version: number
+  createdAt: string
+  updatedAt: string
+  archivedAt: string | null
+}
+
+export type CompanyListSnapshot = Omit<ManagedCompanySnapshot, "archivedAt">
+
+export type CompanyDetailSnapshot = {
+  company: CompanyListSnapshot
+  admins: Array<{
+    id: string
+    displayName: string
+    status: "active" | "suspended"
+  }>
+  bankAccounts: Array<{
+    id: string
+    bankCode: string
+    bankName: string
+    branchLast4: string
+    accountLast4: string
+    accountType: "checking" | "savings" | "payment"
+    isDefault: boolean
+    status: "active" | "archived"
+    version: number
+  }>
+  counters: {
+    activeAdmins: number
+    activeUsers: number
+    bankAccounts: number
+  }
+}
+
+const companyListSnapshotSchema = z
+  .object({
+    id: z.uuid(),
+    legalName: z.string().min(2).max(160),
+    tradeName: z.string().min(2).max(180).nullable(),
+    cnpj: z.string().regex(/^\d{14}$/u),
+    contactEmail: z.email().max(254),
+    contactPhone: z.string().min(8).max(32).nullable(),
+    timezone: z.string().min(1).max(255),
+    status: z.enum(["active", "archived"]),
+    version: z.int().positive(),
+    createdAt: z.iso.datetime({ offset: true }),
+    updatedAt: z.iso.datetime({ offset: true }),
+  })
+  .strict()
+
+const managedCompanySnapshotSchema = companyListSnapshotSchema
+  .extend({ archivedAt: z.iso.datetime({ offset: true }).nullable() })
+  .strict()
+
+const companyDetailSnapshotSchema = z
+  .object({
+    company: companyListSnapshotSchema,
+    admins: z.array(
+      z
+        .object({
+          id: z.uuid(),
+          displayName: z.string().min(2).max(120),
+          status: z.enum(["active", "suspended"]),
+        })
+        .strict(),
+    ),
+    bankAccounts: z.array(
+      z
+        .object({
+          id: z.uuid(),
+          bankCode: z.string().min(1).max(20),
+          bankName: z.string().min(2).max(120),
+          branchLast4: z.string().regex(/^\d{1,4}$/u),
+          accountLast4: z.string().regex(/^\d{1,4}$/u),
+          accountType: z.enum(["checking", "savings", "payment"]),
+          isDefault: z.boolean(),
+          status: z.literal("active"),
+          version: z.int().positive(),
+        })
+        .strict(),
+    ),
+    counters: z
+      .object({
+        activeAdmins: z.int().nonnegative(),
+        activeUsers: z.int().nonnegative(),
+        bankAccounts: z.int().nonnegative(),
+      })
+      .strict(),
+  })
+  .strict()
+
+const reconciliationSnapshotSchema = z
+  .object({
+    reconciliationId: z.uuid(),
+    status: z.enum(["complete", "pending"]),
+    failedUserIds: z.array(z.uuid()),
+    attemptCount: z.int().nonnegative(),
+    updatedAt: z.iso.datetime({ offset: true }),
+  })
+  .strict()
 
 export const bffDb = {
   async consumeRateLimit(input: {
@@ -876,11 +986,11 @@ export const bffDb = {
         ${input.legalName},
         ${input.tradeName},
         ${input.cnpj},
-        ${input.contactEmail}::extensions.citext,
+        ${input.contactEmail}::text,
         ${input.contactPhone},
         ${input.timezone},
         ${input.adminDisplayName},
-        ${input.adminEmail}::extensions.citext,
+        ${input.adminEmail}::text,
         ${input.modules}::public.module_key[],
         ${input.correlationId}::uuid
       ) as result
@@ -906,6 +1016,197 @@ export const bffDb = {
         ${input.errorCode}
       )
     `
+  },
+
+  async updateCompany(input: {
+    actorUserId: string
+    sessionId: string
+    companyId: string
+    legalName: string
+    tradeName: string
+    contactEmail: string
+    contactPhone: string | null
+    timezone: string
+    expectedVersion: number
+    correlationId: string
+  }): Promise<{ company: ManagedCompanySnapshot }> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: { company: ManagedCompanySnapshot } }]>`
+      select private.internal_update_company(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.companyId}::uuid,
+        ${input.legalName},
+        ${input.tradeName},
+        ${input.contactEmail}::text,
+        ${input.contactPhone},
+        ${input.timezone},
+        ${input.expectedVersion}::bigint,
+        ${input.correlationId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return z
+      .object({ company: managedCompanySnapshotSchema })
+      .strict()
+      .parse(row.result)
+  },
+
+  async setCompanyStatus(input: {
+    actorUserId: string
+    sessionId: string
+    companyId: string
+    targetStatus: "active" | "archived"
+    expectedVersion: number
+    reason: string | null
+    correlationId: string
+  }): Promise<{
+    company: ManagedCompanySnapshot
+    affectedUserIds: string[]
+    reconciliationId: string
+  }> {
+    const sql = await getSql()
+    const [row] = await sql<[
+      {
+        result: {
+          company: ManagedCompanySnapshot
+          affectedUserIds: string[]
+          reconciliationId: string
+        }
+      },
+    ]>`
+      select private.internal_set_company_status(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.companyId}::uuid,
+        ${input.targetStatus}::public.company_status,
+        ${input.expectedVersion}::bigint,
+        ${input.reason},
+        ${input.correlationId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    const result = z
+      .object({
+        company: managedCompanySnapshotSchema,
+        affectedUserIds: z.array(z.uuid()),
+        reconciliationId: z.uuid(),
+      })
+      .strict()
+      .parse(row.result)
+    return {
+      ...result,
+      affectedUserIds: [...result.affectedUserIds],
+    }
+  },
+
+  async listCompanies(input: {
+    actorUserId: string
+    sessionId: string
+    search: string | null
+    status: "active" | "archived" | null
+    cursorCreatedAt: string | null
+    cursorId: string | null
+    limit: number
+  }): Promise<{
+    items: CompanyListSnapshot[]
+    nextCursor: { createdAt: string; id: string } | null
+  }> {
+    const sql = await getSql()
+    const [row] = await sql<[
+      {
+        result: {
+          items: CompanyListSnapshot[]
+          nextCursor: { createdAt: string; id: string } | null
+        }
+      },
+    ]>`
+      select private.internal_list_companies(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.search},
+        ${input.status}::public.company_status,
+        ${input.cursorCreatedAt}::timestamptz,
+        ${input.cursorId}::uuid,
+        ${input.limit}
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    const result = z
+      .object({
+        items: z.array(companyListSnapshotSchema),
+        nextCursor: z
+          .object({
+            createdAt: z.iso.datetime({ offset: true }),
+            id: z.uuid(),
+          })
+          .strict()
+          .nullable(),
+      })
+      .strict()
+      .parse(row.result)
+    return {
+      items: [...result.items],
+      nextCursor: result.nextCursor,
+    }
+  },
+
+  async getCompanyDetail(input: {
+    actorUserId: string
+    sessionId: string
+    companyId: string
+  }): Promise<CompanyDetailSnapshot> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: CompanyDetailSnapshot }]>`
+      select private.internal_get_company_detail(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.companyId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return companyDetailSnapshotSchema.parse(row.result)
+  },
+
+  async completeCompanyAccessReconciliation(input: {
+    actorUserId: string
+    sessionId: string
+    reconciliationId: string
+    failedUserIds: string[]
+    correlationId: string
+  }): Promise<{
+    reconciliationId: string
+    status: "complete" | "pending"
+    failedUserIds: string[]
+    attemptCount: number
+    updatedAt: string
+  }> {
+    const sql = await getSql()
+    const [row] = await sql<[
+      {
+        result: {
+          reconciliationId: string
+          status: "complete" | "pending"
+          failedUserIds: string[]
+          attemptCount: number
+          updatedAt: string
+        }
+      },
+    ]>`
+      select private.internal_complete_company_access_reconciliation(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.reconciliationId}::uuid,
+        ${input.failedUserIds}::uuid[],
+        ${input.correlationId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    const result = reconciliationSnapshotSchema.parse(row.result)
+    return {
+      ...result,
+      failedUserIds: [...result.failedUserIds],
+    }
   },
 
   async listCompanyUserDirectory(input: {

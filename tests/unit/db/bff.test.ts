@@ -12,7 +12,7 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe("bffDb boundary", () => {
-  it("exports only the thirty-five typed application database operations", () => {
+  it("exports only the forty typed application database operations", () => {
     expect(Object.keys(bffDb).sort()).toEqual([
       "activateFileUploadAuthorization",
       "assertAuthSession",
@@ -25,6 +25,7 @@ describe("bffDb boundary", () => {
       "claimUploadAuthorizationsForRetirement",
       "clearRateLimit",
       "commitCompanyProvisioning",
+      "completeCompanyAccessReconciliation",
       "completeDownloadAudit",
       "completePasswordRecovery",
       "completeTemporaryPasswordChange",
@@ -35,6 +36,8 @@ describe("bffDb boundary", () => {
       "failPasswordRecovery",
       "failTemporaryPasswordReset",
       "finalizeFileUpload",
+      "getCompanyDetail",
+      "listCompanies",
       "listCompanyUserDirectory",
       "markFileCleanupRequired",
       "markProvisioningAuthCreated",
@@ -47,6 +50,8 @@ describe("bffDb boundary", () => {
       "reserveImageUploadIntent",
       "revokeSessionsAndWriteLogout",
       "rotateAppSessionAfterReauthentication",
+      "setCompanyStatus",
+      "updateCompany",
       "writeAuthenticatedAuditEvent",
       "writeSecurityEvent",
     ])
@@ -376,13 +381,18 @@ describe("bffDb boundary", () => {
       "fail_temporary_password_reset",
       "internal_begin_file_finalization",
       "internal_commit_company_provisioning",
+      "internal_complete_company_access_reconciliation",
       "internal_finalize_file_upload",
+      "internal_get_company_detail",
+      "internal_list_companies",
       "internal_mark_file_cleanup_required",
       "internal_mark_provisioning_auth_created",
       "internal_mark_provisioning_compensation",
       "internal_reject_file_upload",
       "internal_release_file_finalization_for_retry",
       "internal_reserve_company_provisioning",
+      "internal_set_company_status",
+      "internal_update_company",
       "list_company_user_directory",
       "register_auth_session",
       "release_upload_authorization_retirement_claim",

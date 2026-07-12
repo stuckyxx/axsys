@@ -662,7 +662,7 @@ describe("axsys_bff", () => {
     expect(privileges).toEqual({
       publicUsage: true,
       publicCreate: false,
-      extensionsUsage: true,
+        extensionsUsage: false,
       extensionsCreate: false,
     })
   })
@@ -749,7 +749,7 @@ describe("axsys_bff", () => {
     ])
   })
 
-  it("has EXECUTE on all and only the thirty-five allowlisted boundaries", async () => {
+  it("has EXECUTE on all and only the forty allowlisted boundaries", async () => {
     const routines = await postgresOwnerSql<{ routineName: string }[]>`
       select function.proname as "routineName"
       from pg_proc function
@@ -780,13 +780,18 @@ describe("axsys_bff", () => {
       "fail_temporary_password_reset",
       "internal_begin_file_finalization",
       "internal_commit_company_provisioning",
+      "internal_complete_company_access_reconciliation",
       "internal_finalize_file_upload",
+      "internal_get_company_detail",
+      "internal_list_companies",
       "internal_mark_file_cleanup_required",
       "internal_mark_provisioning_auth_created",
       "internal_mark_provisioning_compensation",
       "internal_reject_file_upload",
       "internal_release_file_finalization_for_retry",
       "internal_reserve_company_provisioning",
+      "internal_set_company_status",
+      "internal_update_company",
       "list_company_user_directory",
       "register_auth_session",
       "release_upload_authorization_retirement_claim",

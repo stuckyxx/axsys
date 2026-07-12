@@ -707,14 +707,19 @@ select results_eq(
     ('private.fail_password_recovery(uuid,text,uuid)'),
     ('private.fail_temporary_password_reset(uuid,uuid,uuid,text,uuid)'),
     ('private.internal_begin_file_finalization(uuid,uuid,uuid)'),
-    ('private.internal_commit_company_provisioning(uuid,uuid,uuid,uuid,uuid,text,text,text,citext,text,text,text,citext,module_key[],uuid)'),
+    ('private.internal_commit_company_provisioning(uuid,uuid,uuid,uuid,uuid,text,text,text,text,text,text,text,text,module_key[],uuid)'),
+    ('private.internal_complete_company_access_reconciliation(uuid,uuid,uuid,uuid[],uuid)'),
     ('private.internal_finalize_file_upload(uuid,uuid,uuid,uuid,text,text,text,bigint,text,uuid)'),
+    ('private.internal_get_company_detail(uuid,uuid,uuid)'),
+    ('private.internal_list_companies(uuid,uuid,text,company_status,timestamp with time zone,uuid,integer)'),
     ('private.internal_mark_file_cleanup_required(uuid,uuid,uuid,text)'),
     ('private.internal_mark_provisioning_auth_created(uuid,uuid,uuid,uuid)'),
     ('private.internal_mark_provisioning_compensation(uuid,uuid,uuid,provisioning_status,text)'),
     ('private.internal_reject_file_upload(uuid,uuid,uuid,text)'),
     ('private.internal_release_file_finalization_for_retry(uuid,uuid,uuid,text)'),
     ('private.internal_reserve_company_provisioning(uuid,uuid,text,text,text,uuid)'),
+    ('private.internal_set_company_status(uuid,uuid,uuid,company_status,bigint,text,uuid)'),
+    ('private.internal_update_company(uuid,uuid,uuid,text,text,text,text,text,bigint,uuid)'),
     ('private.list_company_user_directory(uuid,uuid,uuid,integer,text)'),
     ('private.register_auth_session(uuid,uuid,boolean)'),
     ('private.release_upload_authorization_retirement_claim(uuid,uuid,bigint,text)'),
@@ -723,7 +728,7 @@ select results_eq(
     ('private.rotate_app_session_after_reauthentication(uuid,uuid,uuid,uuid)'),
     ('private.write_authenticated_audit_event(uuid,uuid,text,text,uuid,audit_outcome,text,uuid,text,text,jsonb)'),
     ('private.write_security_event(text,uuid,text,text,audit_outcome,text,uuid,jsonb)')$$,
-  'axsys_bff recebe exatamente trinta e cinco EXECUTEs efetivos'
+  'axsys_bff recebe exatamente quarenta EXECUTEs efetivos'
 );
 select results_eq(
   $$select role_name::text collate "default",
