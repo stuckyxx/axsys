@@ -49,3 +49,33 @@ export async function authorizeFileMutation(
   }
   return resolution.context
 }
+
+export async function authorizeFileDownload(): Promise<CompanyAccessContext> {
+  const resolution = await getAccessContext()
+  if (resolution.status === "anonymous") {
+    throw new ApiError("AUTH_REQUIRED", 401, "Faça login para continuar.")
+  }
+  if (resolution.status === "password_change") {
+    throw new ApiError(
+      "PASSWORD_CHANGE_REQUIRED",
+      403,
+      "Altere sua senha provisória para continuar.",
+    )
+  }
+  if (resolution.context.kind !== "company") {
+    throw new ApiError("FILE_FORBIDDEN", 403, "Operação não autorizada.")
+  }
+
+  const decision = await consumeRateLimit(
+    "file-download-user",
+    resolution.context.userId,
+  )
+  if (!decision.allowed) {
+    throw new ApiError(
+      "FILE_RATE_LIMITED",
+      429,
+      "Muitas solicitações. Tente novamente em instantes.",
+    )
+  }
+  return resolution.context
+}

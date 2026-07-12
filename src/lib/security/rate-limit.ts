@@ -16,6 +16,7 @@ export type RateLimitBucket =
   | "forgot-ip-volume"
   | "forgot-account-volume"
   | "file-mutation-user"
+  | "file-download-user"
 
 export type AccountFailureRateLimitBucket =
   | "login-account-failure"
@@ -62,6 +63,11 @@ const RATE_LIMIT_POLICIES = Object.freeze({
   }),
   "file-mutation-user": Object.freeze({
     limit: 20,
+    windowSeconds: 60,
+    blockSeconds: 60,
+  }),
+  "file-download-user": Object.freeze({
+    limit: 60,
     windowSeconds: 60,
     blockSeconds: 60,
   }),
