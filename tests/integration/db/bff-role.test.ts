@@ -641,14 +641,30 @@ describe("axsys_bff", () => {
     }
   })
 
-  it("has no effective privileges on the public schema", async () => {
-    const [privileges] = await sql<[{ usage: boolean; create: boolean }]>`
+  it("has only typed-boundary USAGE on public and extensions schemas", async () => {
+    const [privileges] = await sql<
+      [
+        {
+          publicUsage: boolean
+          publicCreate: boolean
+          extensionsUsage: boolean
+          extensionsCreate: boolean
+        },
+      ]
+    >`
       select
-        has_schema_privilege(current_user, 'public', 'USAGE') as usage,
-        has_schema_privilege(current_user, 'public', 'CREATE') as create
+        has_schema_privilege(current_user, 'public', 'USAGE') as "publicUsage",
+        has_schema_privilege(current_user, 'public', 'CREATE') as "publicCreate",
+        has_schema_privilege(current_user, 'extensions', 'USAGE') as "extensionsUsage",
+        has_schema_privilege(current_user, 'extensions', 'CREATE') as "extensionsCreate"
     `
 
-    expect(privileges).toEqual({ usage: false, create: false })
+    expect(privileges).toEqual({
+      publicUsage: true,
+      publicCreate: false,
+      extensionsUsage: true,
+      extensionsCreate: false,
+    })
   })
 
   it.each([
@@ -733,7 +749,7 @@ describe("axsys_bff", () => {
     ])
   })
 
-  it("has EXECUTE on all and only the thirty-one allowlisted boundaries", async () => {
+  it("has EXECUTE on all and only the thirty-five allowlisted boundaries", async () => {
     const routines = await postgresOwnerSql<{ routineName: string }[]>`
       select function.proname as "routineName"
       from pg_proc function
@@ -763,10 +779,14 @@ describe("axsys_bff", () => {
       "fail_password_recovery",
       "fail_temporary_password_reset",
       "internal_begin_file_finalization",
+      "internal_commit_company_provisioning",
       "internal_finalize_file_upload",
       "internal_mark_file_cleanup_required",
+      "internal_mark_provisioning_auth_created",
+      "internal_mark_provisioning_compensation",
       "internal_reject_file_upload",
       "internal_release_file_finalization_for_retry",
+      "internal_reserve_company_provisioning",
       "list_company_user_directory",
       "register_auth_session",
       "release_upload_authorization_retirement_claim",

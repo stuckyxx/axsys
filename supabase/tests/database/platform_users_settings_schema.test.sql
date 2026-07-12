@@ -454,9 +454,10 @@ select is_empty(
   'role inheritance cannot recover column write privileges'
 );
 
-select is_empty(
-  $$select type.typname || ':' || coalesce(grantee.rolname, 'PUBLIC') || ':'
-           || grant_item.privilege_type
+select results_eq(
+  $$select (type.typname::text || ':'
+           || coalesce(grantee.rolname, 'PUBLIC')::text || ':'
+           || grant_item.privilege_type::text)::text collate "default"
     from pg_type type
     join pg_namespace namespace on namespace.oid = type.typnamespace
     cross join lateral aclexplode(coalesce(type.typacl, acldefault('T', type.typowner))) grant_item
@@ -464,24 +465,34 @@ select is_empty(
     where namespace.nspname = 'public'
       and type.typname in (
         'file_purpose','file_scan_status','file_status','upload_intent_status',
-        'bank_account_status','bank_account_type','provisioning_kind','provisioning_status'
+        'bank_account_status','bank_account_type','module_key',
+        'provisioning_kind','provisioning_status'
       )
-      and (grant_item.grantee = 0 or grantee.rolname in ('anon','authenticated','service_role','axsys_bff'))$$,
-  'enum ACL catalogs contain no direct application grants'
+      and (grant_item.grantee = 0 or grantee.rolname in ('anon','authenticated','service_role','axsys_bff'))
+    order by type.typname, coalesce(grantee.rolname, 'PUBLIC'), grant_item.privilege_type$$,
+  $$values
+    ('module_key:axsys_bff:USAGE'),
+    ('provisioning_status:axsys_bff:USAGE')$$,
+  'enum ACL catalogs expose only the two typed BFF provisioning grants'
 );
 
-select is_empty(
-  $$select role_name || ':' || type.typname
+select results_eq(
+  $$select (role_name::text || ':' || type.typname::text)::text collate "default"
     from unnest(array['public','anon','authenticated','service_role','axsys_bff']) role_name
     cross join pg_type type
     join pg_namespace namespace on namespace.oid = type.typnamespace
     where namespace.nspname = 'public'
       and type.typname in (
         'file_purpose','file_scan_status','file_status','upload_intent_status',
-        'bank_account_status','bank_account_type','provisioning_kind','provisioning_status'
+        'bank_account_status','bank_account_type','module_key',
+        'provisioning_kind','provisioning_status'
       )
-      and has_type_privilege(role_name, type.oid, 'USAGE')$$,
-  'role inheritance cannot recover enum USAGE'
+      and has_type_privilege(role_name, type.oid, 'USAGE')
+    order by role_name, type.typname$$,
+  $$values
+    ('axsys_bff:module_key'),
+    ('axsys_bff:provisioning_status')$$,
+  'role inheritance exposes only the two typed BFF provisioning enums'
 );
 
 select results_eq(
