@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto"
 
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { AccessContext } from "@/modules/auth/domain/access-context"
 import { createAuthorizedDownload } from "@/modules/files/server/authorize-file-download"
@@ -28,6 +28,8 @@ const context: Extract<AccessContext, { kind: "company" }> = {
     version: 1,
   },
 }
+
+afterEach(() => vi.useRealTimers())
 
 function fixture(overrides: Record<string, unknown> = {}) {
   const bytes = new TextEncoder().encode("webp seguro")
@@ -119,6 +121,36 @@ describe("authorized file download", () => {
         correlationId: randomUUID(),
       }),
     ).rejects.toMatchObject({ code: "FILE_NOT_FOUND", status: 404 })
+    expect(deps.storage.downloadPrivate).not.toHaveBeenCalled()
+  })
+
+  it("aborts a stalled authorization before opening Storage", async () => {
+    vi.useFakeTimers()
+    const deps = fixture()
+    let observedSignal: AbortSignal | undefined
+    deps.repository.authorizeImageDownload.mockImplementation(
+      ({ signal }: { signal: AbortSignal }) => {
+        observedSignal = signal
+        return new Promise((_, reject) =>
+          signal.addEventListener("abort", () => reject(new Error("aborted")), {
+            once: true,
+          }),
+        )
+      },
+    )
+    const pending = createAuthorizedDownload(deps, {
+      context,
+      fileId,
+      correlationId: randomUUID(),
+    })
+    const rejection = expect(pending).rejects.toMatchObject({
+      code: "FILE_NOT_FOUND",
+      status: 404,
+    })
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    await rejection
+    expect(observedSignal?.aborted).toBe(true)
     expect(deps.storage.downloadPrivate).not.toHaveBeenCalled()
   })
 
