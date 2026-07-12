@@ -171,6 +171,23 @@ export type UploadAuthorizationRetirementCompletion = {
   authorizationRetiredAt: string
 }
 
+export type CompanyProvisioningOperationSnapshot = {
+  id: string
+  status:
+    | "reserved"
+    | "auth_created"
+    | "committed"
+    | "compensated"
+    | "compensation_required"
+  authUserId: string | null
+}
+
+export type ProvisionedCompanySnapshot = {
+  company: { id: string; status: "active" }
+  membership: { id: string; role: "company_admin" }
+  modules: ("administrative" | "financial" | "certificates")[]
+}
+
 export const bffDb = {
   async consumeRateLimit(input: {
     bucket: string
@@ -786,6 +803,109 @@ export const bffDb = {
       )
     `
     await executeCancellableQuery(query, input.signal)
+  },
+
+  async reserveCompanyProvisioning(input: {
+    actorUserId: string
+    sessionId: string
+    idempotencyKeyHash: string
+    requestHash: string
+    subjectEmailHash: string
+    correlationId: string
+  }): Promise<CompanyProvisioningOperationSnapshot> {
+    const sql = await getSql()
+    const [row] = await sql<CompanyProvisioningOperationSnapshot[]>`
+      select id,
+             status,
+             auth_user_id as "authUserId"
+      from private.internal_reserve_company_provisioning(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.idempotencyKeyHash},
+        ${input.requestHash},
+        ${input.subjectEmailHash},
+        ${input.correlationId}::uuid
+      )
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return row
+  },
+
+  async markProvisioningAuthCreated(input: {
+    operationId: string
+    actorUserId: string
+    sessionId: string
+    authUserId: string
+  }): Promise<void> {
+    const sql = await getSql()
+    await sql`
+      select private.internal_mark_provisioning_auth_created(
+        ${input.operationId}::uuid,
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.authUserId}::uuid
+      )
+    `
+  },
+
+  async commitCompanyProvisioning(input: {
+    operationId: string
+    actorUserId: string
+    sessionId: string
+    authUserId: string
+    companyId: string
+    legalName: string
+    tradeName: string
+    cnpj: string
+    contactEmail: string
+    contactPhone: string | null
+    timezone: string
+    adminDisplayName: string
+    adminEmail: string
+    modules: ("administrative" | "financial" | "certificates")[]
+    correlationId: string
+  }): Promise<ProvisionedCompanySnapshot> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: ProvisionedCompanySnapshot }]>`
+      select private.internal_commit_company_provisioning(
+        ${input.operationId}::uuid,
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.authUserId}::uuid,
+        ${input.companyId}::uuid,
+        ${input.legalName},
+        ${input.tradeName},
+        ${input.cnpj},
+        ${input.contactEmail}::extensions.citext,
+        ${input.contactPhone},
+        ${input.timezone},
+        ${input.adminDisplayName},
+        ${input.adminEmail}::extensions.citext,
+        ${input.modules}::public.module_key[],
+        ${input.correlationId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return row.result
+  },
+
+  async markProvisioningCompensation(input: {
+    operationId: string
+    actorUserId: string
+    sessionId: string
+    status: "compensated" | "compensation_required"
+    errorCode: "DB_COMMIT_FAILED" | "AUTH_DELETE_FAILED"
+  }): Promise<void> {
+    const sql = await getSql()
+    await sql`
+      select private.internal_mark_provisioning_compensation(
+        ${input.operationId}::uuid,
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.status}::public.provisioning_status,
+        ${input.errorCode}
+      )
+    `
   },
 
   async listCompanyUserDirectory(input: {

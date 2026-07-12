@@ -12,7 +12,7 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe("bffDb boundary", () => {
-  it("exports only the thirty-one typed security-control, password, upload and directory operations", () => {
+  it("exports only the thirty-five typed application database operations", () => {
     expect(Object.keys(bffDb).sort()).toEqual([
       "activateFileUploadAuthorization",
       "assertAuthSession",
@@ -24,6 +24,7 @@ describe("bffDb boundary", () => {
       "cancelUnissuedFileReservation",
       "claimUploadAuthorizationsForRetirement",
       "clearRateLimit",
+      "commitCompanyProvisioning",
       "completeDownloadAudit",
       "completePasswordRecovery",
       "completeTemporaryPasswordChange",
@@ -36,10 +37,13 @@ describe("bffDb boundary", () => {
       "finalizeFileUpload",
       "listCompanyUserDirectory",
       "markFileCleanupRequired",
+      "markProvisioningAuthCreated",
+      "markProvisioningCompensation",
       "registerAuthSession",
       "rejectFileUpload",
       "releaseFileFinalizationForRetry",
       "releaseUploadAuthorizationRetirementClaim",
+      "reserveCompanyProvisioning",
       "reserveImageUploadIntent",
       "revokeSessionsAndWriteLogout",
       "rotateAppSessionAfterReauthentication",
@@ -371,10 +375,14 @@ describe("bffDb boundary", () => {
       "fail_password_recovery",
       "fail_temporary_password_reset",
       "internal_begin_file_finalization",
+      "internal_commit_company_provisioning",
       "internal_finalize_file_upload",
       "internal_mark_file_cleanup_required",
+      "internal_mark_provisioning_auth_created",
+      "internal_mark_provisioning_compensation",
       "internal_reject_file_upload",
       "internal_release_file_finalization_for_retry",
+      "internal_reserve_company_provisioning",
       "list_company_user_directory",
       "register_auth_session",
       "release_upload_authorization_retirement_claim",

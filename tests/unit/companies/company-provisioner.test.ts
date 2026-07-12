@@ -23,8 +23,9 @@ const input = {
 function fixture() {
   const operationId = randomUUID()
   const authUserId = randomUUID()
+  const companyId = randomUUID()
   const result = {
-    company: { id: randomUUID(), status: "active" as const },
+    company: { id: companyId, status: "active" as const },
     membership: { id: randomUUID(), role: "company_admin" as const },
     modules: [...input.firstAdmin.modules],
   }
@@ -40,7 +41,15 @@ function fixture() {
     deleteUser: vi.fn().mockResolvedValue(undefined),
     banUser: vi.fn().mockResolvedValue(undefined),
   }
-  return { operationId, authUserId, result, repository, auth }
+  return {
+    operationId,
+    authUserId,
+    companyId,
+    result,
+    repository,
+    auth,
+    uuid: vi.fn(() => companyId),
+  }
 }
 
 const command = {

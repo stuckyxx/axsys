@@ -1,11 +1,16 @@
 import "server-only"
 
+import { randomUUID } from "node:crypto"
+
+import { bffDb } from "@/lib/db/bff"
 import { ApiError } from "@/lib/http/api-error"
+import { fingerprintSensitiveExact } from "@/lib/security/redact"
 import {
   createCompanySchema,
   type CreateCompanyInput,
 } from "@/modules/companies/schemas/company-schemas"
 import { validatePassword } from "@/modules/auth/server/password-policy"
+import { getAuthAdminGateway } from "@/modules/users/server/auth-admin-gateway"
 
 type ProvisionedCompany = Readonly<{
   company: Readonly<{ id: string; status: "active" }>
@@ -39,6 +44,7 @@ export type CompanyProvisioningDependencies = Readonly<{
       actorUserId: string
       sessionId: string
       authUserId: string
+      companyId: string
       correlationId: string
       company: Omit<CreateCompanyInput, "firstAdmin">
       firstAdmin: Omit<CreateCompanyInput["firstAdmin"], "temporaryPassword">
@@ -66,6 +72,7 @@ export type CompanyProvisioningDependencies = Readonly<{
     banUser(userId: string): Promise<void>
   }>
   fingerprint(purpose: string, value: string): string
+  uuid(): string
 }>
 
 function provisioningError(code: string): ApiError {
@@ -196,6 +203,7 @@ export async function provisionCompany(
       actorUserId: command.actorUserId,
       sessionId: command.sessionId,
       authUserId,
+      companyId: deps.uuid(),
       correlationId: command.correlationId,
       company,
       firstAdmin: safeFirstAdmin,
@@ -208,5 +216,70 @@ export async function provisionCompany(
       command.actorUserId,
       command.sessionId,
     )
+  }
+}
+
+export function getCompanyProvisioningDependencies(): CompanyProvisioningDependencies {
+  const auth = getAuthAdminGateway()
+  return {
+    repository: {
+      async reserve(input) {
+        const operation = await bffDb.reserveCompanyProvisioning(input)
+        if (operation.status === "reserved") {
+          return { id: operation.id, status: "reserved" }
+        }
+        if (
+          (operation.status === "auth_created" ||
+            operation.status === "committed") &&
+          operation.authUserId !== null
+        ) {
+          return {
+            id: operation.id,
+            status: operation.status,
+            authUserId: operation.authUserId,
+          }
+        }
+        throw provisioningError("COMPANY_CREATE_FAILED")
+      },
+      markAuthCreated: (input) =>
+        bffDb.markProvisioningAuthCreated(input),
+      commit: (input) =>
+        bffDb.commitCompanyProvisioning({
+          operationId: input.operationId,
+          actorUserId: input.actorUserId,
+          sessionId: input.sessionId,
+          authUserId: input.authUserId,
+          companyId: input.companyId,
+          legalName: input.company.legalName,
+          tradeName: input.company.tradeName,
+          cnpj: input.company.cnpj,
+          contactEmail: input.company.contactEmail,
+          contactPhone: input.company.contactPhone,
+          timezone: input.company.timezone,
+          adminDisplayName: input.firstAdmin.displayName,
+          adminEmail: input.firstAdmin.email,
+          modules: input.firstAdmin.modules,
+          correlationId: input.correlationId,
+        }),
+      markCompensated: (input) =>
+        bffDb.markProvisioningCompensation({
+          operationId: input.operationId,
+          actorUserId: input.actorUserId,
+          sessionId: input.sessionId,
+          status: "compensated",
+          errorCode: input.reason,
+        }),
+      markCompensationRequired: (input) =>
+        bffDb.markProvisioningCompensation({
+          operationId: input.operationId,
+          actorUserId: input.actorUserId,
+          sessionId: input.sessionId,
+          status: "compensation_required",
+          errorCode: input.reason,
+        }),
+    },
+    auth,
+    fingerprint: fingerprintSensitiveExact,
+    uuid: randomUUID,
   }
 }
