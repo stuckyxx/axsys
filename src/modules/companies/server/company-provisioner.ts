@@ -67,7 +67,13 @@ export type CompanyProvisioningDependencies = Readonly<{
       email: string
       password: string
       emailConfirm: true
+      provisioningOperationId: string
     }): Promise<{ id: string }>
+    findProvisionedUser(input: {
+      operationId: string
+      subjectEmailHash: string
+      fingerprintEmail(email: string): string
+    }): Promise<{ id: string } | null>
     deleteUser(userId: string): Promise<void>
     banUser(userId: string): Promise<void>
   }>
@@ -103,6 +109,11 @@ function isNeutralCompanyConflict(error: unknown): boolean {
   ].includes(externalErrorCode(error) ?? "")
 }
 
+function isDefinitiveCommitFailure(error: unknown): boolean {
+  const code = externalErrorCode(error)
+  return code !== null && /^(?:22|23|42|P0001)/u.test(code)
+}
+
 function requestFingerprint(
   deps: CompanyProvisioningDependencies,
   input: CreateCompanyInput,
@@ -133,15 +144,7 @@ async function compensateAuthUser(
 ): Promise<never> {
   try {
     await deps.auth.deleteUser(authUserId)
-    await deps.repository.markCompensated({
-      operationId,
-      actorUserId,
-      sessionId,
-      reason: "DB_COMMIT_FAILED",
-    })
-    throw terminalError
-  } catch (error) {
-    if (error instanceof ApiError) throw error
+  } catch {
     try {
       await deps.auth.banUser(authUserId)
     } catch {
@@ -155,6 +158,17 @@ async function compensateAuthUser(
     })
     throw provisioningError("COMPANY_CREATE_COMPENSATION_PENDING")
   }
+  try {
+    await deps.repository.markCompensated({
+      operationId,
+      actorUserId,
+      sessionId,
+      reason: "DB_COMMIT_FAILED",
+    })
+  } catch {
+    throw provisioningError("COMPANY_CREATE_RECONCILIATION_REQUIRED")
+  }
+  throw terminalError
 }
 
 export async function provisionCompany(
@@ -169,7 +183,11 @@ export async function provisionCompany(
 ): Promise<ProvisionedCompany> {
   const input = createCompanySchema.parse(command.input)
   await validatePassword(input.firstAdmin.temporaryPassword)
-  const operation = await deps.repository.reserve({
+  const subjectEmailHash = deps.fingerprint(
+    "company-first-admin-email",
+    input.firstAdmin.email,
+  )
+  const reservationInput = {
     actorUserId: command.actorUserId,
     sessionId: command.sessionId,
     idempotencyKeyHash: deps.fingerprint(
@@ -177,43 +195,65 @@ export async function provisionCompany(
       command.idempotencyKey,
     ),
     requestHash: requestFingerprint(deps, input),
-    subjectEmailHash: deps.fingerprint(
-      "company-first-admin-email",
-      input.firstAdmin.email,
-    ),
+    subjectEmailHash,
     correlationId: command.correlationId,
-  })
+  }
+  let operation = await deps.repository.reserve(reservationInput)
   let authUserId: string
   if (operation.status === "auth_created" || operation.status === "committed") {
     authUserId = operation.authUserId
   } else {
-    let created: { id: string }
+    const findMarkedAuthUser = () =>
+      deps.auth.findProvisionedUser({
+        operationId: operation.id,
+        subjectEmailHash,
+        fingerprintEmail: (email) =>
+          deps.fingerprint("company-first-admin-email", email),
+      })
+    let recovered: { id: string } | null = null
     try {
-      created = await deps.auth.createUser({
+      recovered = await deps.auth.createUser({
         email: input.firstAdmin.email,
         password: input.firstAdmin.temporaryPassword,
         emailConfirm: true,
+        provisioningOperationId: operation.id,
       })
     } catch (error) {
-      if (isNeutralCompanyConflict(error)) throw companyConflictError()
-      throw provisioningError("COMPANY_CREATE_FAILED")
+      if (!isNeutralCompanyConflict(error)) {
+        throw provisioningError("COMPANY_CREATE_FAILED")
+      }
+      operation = await deps.repository.reserve(reservationInput)
+      if (
+        operation.status === "auth_created" ||
+        operation.status === "committed"
+      ) {
+        recovered = { id: operation.authUserId }
+      } else {
+        recovered = await findMarkedAuthUser()
+      }
+      if (recovered === null) throw companyConflictError()
     }
-    authUserId = created.id
-    try {
-      await deps.repository.markAuthCreated({
-        operationId: operation.id,
-        actorUserId: command.actorUserId,
-        sessionId: command.sessionId,
-        authUserId,
-      })
-    } catch {
-      return compensateAuthUser(
-        deps,
-        operation.id,
-        authUserId,
-        command.actorUserId,
-        command.sessionId,
-      )
+    authUserId = recovered.id
+    if (operation.status === "reserved") {
+      try {
+        await deps.repository.markAuthCreated({
+          operationId: operation.id,
+          actorUserId: command.actorUserId,
+          sessionId: command.sessionId,
+          authUserId,
+        })
+      } catch {
+        const refreshed = await deps.repository.reserve(reservationInput)
+        if (
+          (refreshed.status === "auth_created" ||
+            refreshed.status === "committed") &&
+          refreshed.authUserId === authUserId
+        ) {
+          operation = refreshed
+        } else {
+          throw provisioningError("COMPANY_CREATE_RETRY_REQUIRED")
+        }
+      }
     }
   }
 
@@ -235,6 +275,29 @@ export async function provisionCompany(
       firstAdmin: safeFirstAdmin,
     })
   } catch (error) {
+    if (!isDefinitiveCommitFailure(error)) {
+      try {
+        const refreshed = await deps.repository.reserve(reservationInput)
+        if (
+          refreshed.status === "committed" &&
+          refreshed.authUserId === authUserId
+        ) {
+          return await deps.repository.commit({
+            operationId: refreshed.id,
+            actorUserId: command.actorUserId,
+            sessionId: command.sessionId,
+            authUserId,
+            companyId: deps.uuid(),
+            correlationId: command.correlationId,
+            company,
+            firstAdmin: safeFirstAdmin,
+          })
+        }
+      } catch {
+        // An unknown outcome stays retryable; deleting Auth would be unsafe.
+      }
+      throw provisioningError("COMPANY_CREATE_RETRY_REQUIRED")
+    }
     return compensateAuthUser(
       deps,
       operation.id,

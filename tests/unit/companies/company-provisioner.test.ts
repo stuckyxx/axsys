@@ -38,6 +38,7 @@ function fixture() {
   }
   const auth = {
     createUser: vi.fn().mockResolvedValue({ id: authUserId }),
+    findProvisionedUser: vi.fn().mockResolvedValue(null),
     deleteUser: vi.fn().mockResolvedValue(undefined),
     banUser: vi.fn().mockResolvedValue(undefined),
   }
@@ -70,6 +71,7 @@ describe("company provisioner", () => {
       email: "maria@example.com",
       password: "frase provisoria segura 2026",
       emailConfirm: true,
+      provisioningOperationId: deps.operationId,
     })
     expect(deps.repository.markAuthCreated).toHaveBeenCalledWith({
       operationId: deps.operationId,
@@ -82,9 +84,68 @@ describe("company provisioner", () => {
     )
   })
 
+  it("resumes a reserved operation from its marked Auth user after a crash", async () => {
+    const deps = fixture()
+    deps.auth.createUser.mockRejectedValue(
+      Object.assign(new Error("existing marked user"), {
+        code: "user_already_exists",
+      }),
+    )
+    deps.auth.findProvisionedUser.mockResolvedValue({ id: deps.authUserId })
+
+    await expect(
+      provisionCompany({ ...deps, fingerprint: vi.fn(() => "2".repeat(64)) }, command),
+    ).resolves.toEqual(deps.result)
+    expect(deps.auth.createUser).toHaveBeenCalledOnce()
+    expect(deps.repository.markAuthCreated).toHaveBeenCalledWith({
+      operationId: deps.operationId,
+      actorUserId: command.actorUserId,
+      sessionId: command.sessionId,
+      authUserId: deps.authUserId,
+    })
+  })
+
+  it("converges on the marked Auth user when concurrent creation reports a duplicate", async () => {
+    const deps = fixture()
+    deps.auth.createUser.mockRejectedValue(
+      Object.assign(new Error("private Auth duplicate detail"), {
+        code: "user_already_exists",
+      }),
+    )
+    deps.auth.findProvisionedUser.mockResolvedValue({ id: deps.authUserId })
+
+    await expect(
+      provisionCompany({ ...deps, fingerprint: vi.fn(() => "3".repeat(64)) }, command),
+    ).resolves.toEqual(deps.result)
+    expect(deps.repository.reserve).toHaveBeenCalledTimes(2)
+    expect(deps.auth.deleteUser).not.toHaveBeenCalled()
+  })
+
+  it("does not compensate a valid Auth user when another retry already committed it", async () => {
+    const deps = fixture()
+    deps.auth.findProvisionedUser.mockResolvedValue({ id: deps.authUserId })
+    deps.repository.markAuthCreated.mockRejectedValue(
+      new Error("transition already completed"),
+    )
+    deps.repository.reserve
+      .mockResolvedValueOnce({ id: deps.operationId, status: "reserved" })
+      .mockResolvedValueOnce({
+        id: deps.operationId,
+        status: "committed",
+        authUserId: deps.authUserId,
+      })
+
+    await expect(
+      provisionCompany({ ...deps, fingerprint: vi.fn(() => "4".repeat(64)) }, command),
+    ).resolves.toEqual(deps.result)
+    expect(deps.auth.deleteUser).not.toHaveBeenCalled()
+  })
+
   it("deletes Auth and marks compensation when SQL commit fails", async () => {
     const deps = fixture()
-    deps.repository.commit.mockRejectedValue(new Error("unique cnpj details"))
+    deps.repository.commit.mockRejectedValue(
+      Object.assign(new Error("invalid commit details"), { code: "23514" }),
+    )
 
     await expect(
       provisionCompany({ ...deps, fingerprint: vi.fn(() => "b".repeat(64)) }, command),
@@ -155,7 +216,9 @@ describe("company provisioner", () => {
 
   it("bans an orphan and schedules reconciliation if deletion fails", async () => {
     const deps = fixture()
-    deps.repository.commit.mockRejectedValue(new Error("database unavailable"))
+    deps.repository.commit.mockRejectedValue(
+      Object.assign(new Error("invalid persisted state"), { code: "23514" }),
+    )
     deps.auth.deleteUser.mockRejectedValue(new Error("auth unavailable"))
 
     await expect(
@@ -170,6 +233,76 @@ describe("company provisioner", () => {
       sessionId: command.sessionId,
       reason: "AUTH_DELETE_FAILED",
     })
+  })
+
+  it("does not misclassify a compensation marker failure as an Auth delete failure", async () => {
+    const deps = fixture()
+    deps.repository.commit.mockRejectedValue(
+      Object.assign(new Error("invalid persisted state"), { code: "23514" }),
+    )
+    deps.repository.markCompensated.mockRejectedValue(
+      new Error("marker unavailable"),
+    )
+
+    await expect(
+      provisionCompany({ ...deps, fingerprint: vi.fn(() => "8".repeat(64)) }, command),
+    ).rejects.toMatchObject({
+      code: "COMPANY_CREATE_RECONCILIATION_REQUIRED",
+    })
+    expect(deps.auth.deleteUser).toHaveBeenCalledWith(deps.authUserId)
+    expect(deps.auth.banUser).not.toHaveBeenCalled()
+    expect(deps.repository.markCompensationRequired).not.toHaveBeenCalled()
+  })
+
+  it("replays an ambiguous commit outcome before considering compensation", async () => {
+    const deps = fixture()
+    deps.repository.commit
+      .mockRejectedValueOnce(new Error("connection lost after send"))
+      .mockResolvedValueOnce(deps.result)
+    deps.repository.reserve
+      .mockResolvedValueOnce({ id: deps.operationId, status: "reserved" })
+      .mockResolvedValueOnce({
+        id: deps.operationId,
+        status: "committed",
+        authUserId: deps.authUserId,
+      })
+
+    await expect(
+      provisionCompany({ ...deps, fingerprint: vi.fn(() => "5".repeat(64)) }, command),
+    ).resolves.toEqual(deps.result)
+    expect(deps.repository.commit).toHaveBeenCalledTimes(2)
+    expect(deps.auth.deleteUser).not.toHaveBeenCalled()
+  })
+
+  it("keeps Auth intact when an ambiguous commit is not yet observable", async () => {
+    const deps = fixture()
+    deps.repository.commit.mockRejectedValue(new Error("connection unavailable"))
+    deps.repository.reserve
+      .mockResolvedValueOnce({ id: deps.operationId, status: "reserved" })
+      .mockResolvedValueOnce({
+        id: deps.operationId,
+        status: "auth_created",
+        authUserId: deps.authUserId,
+      })
+
+    await expect(
+      provisionCompany({ ...deps, fingerprint: vi.fn(() => "6".repeat(64)) }, command),
+    ).rejects.toMatchObject({ code: "COMPANY_CREATE_RETRY_REQUIRED" })
+    expect(deps.auth.deleteUser).not.toHaveBeenCalled()
+    expect(deps.auth.banUser).not.toHaveBeenCalled()
+  })
+
+  it("does not delete Auth when marking remains reserved after a race", async () => {
+    const deps = fixture()
+    deps.repository.markAuthCreated.mockRejectedValue(new Error("transition race"))
+    deps.repository.reserve
+      .mockResolvedValueOnce({ id: deps.operationId, status: "reserved" })
+      .mockResolvedValueOnce({ id: deps.operationId, status: "reserved" })
+
+    await expect(
+      provisionCompany({ ...deps, fingerprint: vi.fn(() => "7".repeat(64)) }, command),
+    ).rejects.toMatchObject({ code: "COMPANY_CREATE_RETRY_REQUIRED" })
+    expect(deps.auth.deleteUser).not.toHaveBeenCalled()
   })
 
   it("rejects weak provisional passwords before reserving the saga", async () => {
