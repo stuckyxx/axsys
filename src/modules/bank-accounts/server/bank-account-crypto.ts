@@ -26,6 +26,8 @@ type EncryptedBankAccount = Readonly<{
 
 const BANK_KEY_ENV = "BANK_ACCOUNT_ENCRYPTION_KEY_V1_BASE64"
 const BANK_CRYPTO_FAILURE = "Bank encryption key unavailable"
+const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
 
 function runtimeKeyring(): BankKeyring {
   return {
@@ -70,6 +72,9 @@ export function encryptBankAccount(
   }>,
   keyring: BankKeyring = runtimeKeyring(),
 ): EncryptedBankAccount {
+  if (!UUID.test(input.companyId) || !UUID.test(input.bankAccountId)) {
+    throw new Error("Invalid bank encryption scope")
+  }
   const branch = normalizeDigits(input.branch, "branch")
   const account = normalizeDigits(input.account, "account")
   const holderDocument =
@@ -116,6 +121,9 @@ export function decryptBankField(
   bankAccountId: string,
   field: BankField,
 ): string {
+  if (!UUID.test(companyId) || !UUID.test(bankAccountId)) {
+    throw new Error("Invalid bank encryption scope")
+  }
   return decryptValue(
     encrypted,
     keyFor(keyring, encrypted.keyVersion),

@@ -84,4 +84,19 @@ describe("bank account encryption", () => {
       ),
     ).toThrow("Bank encryption key unavailable")
   })
+
+  it("rejects ambiguous non-UUID encryption scopes", () => {
+    expect(() =>
+      encryptBankAccount(
+        {
+          companyId: "company:a",
+          bankAccountId: crypto.randomUUID(),
+          branch: "1234",
+          account: "987654",
+          holderDocument: null,
+        },
+        keyring,
+      ),
+    ).toThrow("Invalid bank encryption scope")
+  })
 })
