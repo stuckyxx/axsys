@@ -149,6 +149,7 @@ describe.sequential("Task 17 adversarial handler IDOR matrix", () => {
         body: {
           targetUserId: fixture.adminB.userId,
           password: "Axsys-Task17-CrossTenant-82!",
+          reasonCode: "ADMIN_RESET_USER_REQUEST",
         },
         csrf,
         ip: fixture.adminA.clientIp,
@@ -161,6 +162,7 @@ describe.sequential("Task 17 adversarial handler IDOR matrix", () => {
         body: {
           targetUserId: randomUUID(),
           password: "Axsys-Task17-Unknown-82!",
+          reasonCode: "ADMIN_RESET_USER_REQUEST",
         },
         csrf,
         ip: fixture.adminA.clientIp,
@@ -192,6 +194,7 @@ describe.sequential("Task 17 adversarial handler IDOR matrix", () => {
         body: {
           targetUserId: fixture.adminA.userId,
           password: "Axsys-Task17-OrdinaryMember-82!",
+          reasonCode: "ADMIN_RESET_USER_REQUEST",
         },
         csrf: fixture.issueCsrf(fixture.memberA.jar),
         ip: fixture.memberA.clientIp,
@@ -325,6 +328,7 @@ describe.sequential("Task 17 adversarial handler IDOR matrix", () => {
         body: {
           targetUserId: fixture.adminB.userId,
           password: "Axsys-Task17-Visitor-Valid-82!",
+          reasonCode: "ADMIN_RESET_USER_REQUEST",
         },
         csrf,
         method: "POST",
@@ -336,6 +340,7 @@ describe.sequential("Task 17 adversarial handler IDOR matrix", () => {
         body: {
           targetUserId: randomUUID(),
           password: "Axsys-Task17-Visitor-Unknown-82!",
+          reasonCode: "ADMIN_RESET_USER_REQUEST",
         },
         csrf,
         method: "POST",
@@ -363,6 +368,7 @@ describe.sequential("Task 17 adversarial handler IDOR matrix", () => {
         body: {
           targetUserId: fixture.adminA.userId,
           password: "Axsys-Task17-MissingCsrf-82!",
+          reasonCode: "ADMIN_RESET_USER_REQUEST",
         },
         ip: fixture.adminA.clientIp,
         method: "POST",
@@ -374,6 +380,7 @@ describe.sequential("Task 17 adversarial handler IDOR matrix", () => {
         body: {
           targetUserId: fixture.adminA.userId,
           password: "Axsys-Task17-ExternalOrigin-82!",
+          reasonCode: "ADMIN_RESET_USER_REQUEST",
         },
         csrf: fixture.issueCsrf(fixture.adminA.jar),
         ip: fixture.adminA.clientIp,

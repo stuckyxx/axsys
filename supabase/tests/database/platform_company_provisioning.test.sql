@@ -422,6 +422,12 @@ from private.internal_reserve_company_provisioning(
   repeat('a',64),repeat('b',64),repeat('c',64),
   '82000000-0000-4000-8000-000000000101'
 ) operation;
+reset role;
+update auth.users set raw_app_meta_data=pg_catalog.jsonb_build_object(
+  'axsys_provisioning_operation_id',
+  (select operation_id from provisioning_operation_refs where label='primary')
+) where id='22000000-0000-4000-8000-000000000101';
+set local role axsys_bff;
 select results_eq(
   $$select id, status::text, auth_user_id, company_id, last_error_code
     from private.internal_reserve_company_provisioning(
@@ -533,7 +539,7 @@ select throws_ok(
       '91000000-0000-4000-8000-000000000101',
       '22000000-0000-4000-8000-000000000102'
     )$$,
-  '23514','AXSYS_PROVISIONING_OPERATION_INVALID',
+  '23514','AXSYS_PROVISIONING_AUTH_USER_INVALID',
   'auth-created replay cannot substitute another Auth user'
 );
 select throws_ok(
@@ -716,6 +722,12 @@ from private.internal_reserve_company_provisioning(
   repeat('1',64),repeat('2',64),repeat('3',64),
   '82000000-0000-4000-8000-000000000111'
 ) operation;
+reset role;
+update auth.users set raw_app_meta_data=pg_catalog.jsonb_build_object(
+  'axsys_provisioning_operation_id',
+  (select operation_id from provisioning_operation_refs where label='compensated')
+) where id='22000000-0000-4000-8000-000000000102';
+set local role axsys_bff;
 select private.internal_mark_provisioning_auth_created(
   (select operation_id from provisioning_operation_refs where label='compensated'),
   '21000000-0000-4000-8000-000000000101',
@@ -743,6 +755,12 @@ from private.internal_reserve_company_provisioning(
   repeat('4',64),repeat('5',64),repeat('6',64),
   '82000000-0000-4000-8000-000000000112'
 ) operation;
+reset role;
+update auth.users set raw_app_meta_data=pg_catalog.jsonb_build_object(
+  'axsys_provisioning_operation_id',
+  (select operation_id from provisioning_operation_refs where label='compensation-required')
+) where id='22000000-0000-4000-8000-000000000103';
+set local role axsys_bff;
 select private.internal_mark_provisioning_auth_created(
   (select operation_id from provisioning_operation_refs where label='compensation-required'),
   '21000000-0000-4000-8000-000000000101',

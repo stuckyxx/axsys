@@ -64,6 +64,18 @@ const moduleRowsSchema = z.array(
   z.object({ module: z.enum(MODULE_ORDER) }).strict(),
 )
 
+const companyApiContextSchema = z
+  .object({
+    companyId: z.uuid(),
+    membershipId: z.uuid(),
+    role: z.enum(["company_admin", "member"]),
+    modules: z.array(z.enum(MODULE_ORDER)),
+    companyStatus: z.enum(["active", "archived"]),
+    mustChangePassword: z.boolean(),
+    temporaryPasswordExpiresAt: z.string().nullable(),
+  })
+  .strict()
+
 export type AccessResolution =
   | Readonly<{ status: "anonymous" }>
   | Readonly<{
@@ -73,8 +85,16 @@ export type AccessResolution =
     }>
   | Readonly<{ status: "authenticated"; context: AccessContext }>
 
+export type CompanyApiAccessResolution =
+  | AccessResolution
+  | Readonly<{ status: "company_inactive"; reason: "archived" }>
+
 const ANONYMOUS_RESOLUTION: AccessResolution = Object.freeze({
   status: "anonymous",
+})
+const ARCHIVED_COMPANY_RESOLUTION: CompanyApiAccessResolution = Object.freeze({
+  status: "company_inactive",
+  reason: "archived",
 })
 
 function isTemporaryPasswordExpired(expiresAt: string | null): boolean {
@@ -143,7 +163,9 @@ function authenticated(context: AccessContext): AccessResolution {
   return Object.freeze({ status: "authenticated", context })
 }
 
-export async function getAccessContext(): Promise<AccessResolution> {
+async function resolveAccessContext(
+  preserveArchivedCompany: boolean,
+): Promise<CompanyApiAccessResolution> {
   try {
     const client = await createServerSupabase()
     const claimsResult = await client.auth.getClaims()
@@ -220,6 +242,46 @@ export async function getAccessContext(): Promise<AccessResolution> {
       )
     }
 
+    if (preserveArchivedCompany) {
+      const apiContextResult = await client.rpc(
+        "company_get_api_access_context",
+      )
+      if (apiContextResult.error !== null) return ANONYMOUS_RESOLUTION
+      const parsedApiContext = companyApiContextSchema.safeParse(
+        apiContextResult.data,
+      )
+      if (!parsedApiContext.success) return ANONYMOUS_RESOLUTION
+      const apiContext = parsedApiContext.data
+      if (apiContext.mustChangePassword) {
+        return Object.freeze({
+          status: "password_change",
+          userId: claims.sub,
+          expired: isTemporaryPasswordExpired(
+            apiContext.temporaryPasswordExpiresAt,
+          ),
+        })
+      }
+      if (apiContext.companyStatus === "archived") {
+        return ARCHIVED_COMPANY_RESOLUTION
+      }
+      const moduleSet = new Set<ModuleKey>(apiContext.modules)
+      return authenticated(
+        Object.freeze({
+          kind: "company",
+          userId: claims.sub,
+          sessionId: claims.session_id,
+          authenticatedAt,
+          companyId: apiContext.companyId,
+          membershipId: apiContext.membershipId,
+          role: apiContext.role,
+          modules: Object.freeze(
+            MODULE_ORDER.filter((module) => moduleSet.has(module)),
+          ),
+          profile: profileSummary,
+        }),
+      )
+    }
+
     const membershipResult = await client
       .from("company_memberships")
       .select("id,company_id,role,status")
@@ -245,8 +307,13 @@ export async function getAccessContext(): Promise<AccessResolution> {
     }
 
     const parsedCompany = companyRowSchema.safeParse(companyResult.data)
-    if (!parsedCompany.success || parsedCompany.data.status !== "active") {
+    if (!parsedCompany.success) {
       return ANONYMOUS_RESOLUTION
+    }
+    if (parsedCompany.data.status === "archived") {
+      return preserveArchivedCompany
+        ? ARCHIVED_COMPANY_RESOLUTION
+        : ANONYMOUS_RESOLUTION
     }
 
     const modulesResult = await client
@@ -286,4 +353,15 @@ export async function getAccessContext(): Promise<AccessResolution> {
   } catch {
     return ANONYMOUS_RESOLUTION
   }
+}
+
+export async function getAccessContext(): Promise<AccessResolution> {
+  const resolution = await resolveAccessContext(false)
+  return resolution.status === "company_inactive"
+    ? ANONYMOUS_RESOLUTION
+    : resolution
+}
+
+export async function getCompanyApiAccessContext(): Promise<CompanyApiAccessResolution> {
+  return resolveAccessContext(true)
 }

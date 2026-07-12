@@ -93,7 +93,13 @@ select results_eq(
 select has_function(
   'private'::name,
   'begin_temporary_password_reset'::name,
-  array['uuid','uuid','uuid','uuid']
+  array['uuid','uuid','uuid','text','uuid']
+);
+select hasnt_function(
+  'private'::name,
+  'begin_temporary_password_reset'::name,
+  array['uuid','uuid','uuid','uuid'],
+  'legacy boundary without categorized reason is absent'
 );
 select has_function(
   'private'::name,
@@ -130,7 +136,7 @@ select results_eq(
     order by function.proname$$,
   $$values
     ('begin_temporary_password_reset',
-      'p_actor_user_id uuid, p_session_id uuid, p_target_user_id uuid, p_correlation_id uuid',
+      'p_actor_user_id uuid, p_session_id uuid, p_target_user_id uuid, p_request_reason_code text, p_correlation_id uuid',
       'TABLE(operation_id uuid, expires_at timestamp with time zone)',
       'postgres', true, true),
     ('complete_temporary_password_change',
@@ -170,20 +176,31 @@ select results_eq(
     ('fail_closed_login_session'),
     ('fail_password_recovery'),
     ('fail_temporary_password_reset'),
+    ('internal_archive_bank_account'),
     ('internal_begin_file_finalization'),
+    ('internal_commit_company_admin_provisioning'),
     ('internal_commit_company_provisioning'),
     ('internal_complete_company_access_reconciliation'),
+    ('internal_complete_member_auth_access_reconciliation'),
     ('internal_finalize_file_upload'),
+    ('internal_find_provisioning_auth_user'),
     ('internal_get_company_detail'),
+    ('internal_get_company_user'),
+    ('internal_get_platform_company_admin'),
     ('internal_list_companies'),
+    ('internal_list_company_bank_accounts'),
     ('internal_mark_file_cleanup_required'),
     ('internal_mark_provisioning_auth_created'),
     ('internal_mark_provisioning_compensation'),
+    ('internal_platform_update_company_admin'),
     ('internal_reject_file_upload'),
     ('internal_release_file_finalization_for_retry'),
+    ('internal_reserve_company_admin_provisioning'),
     ('internal_reserve_company_provisioning'),
     ('internal_set_company_status'),
+    ('internal_set_default_bank_account'),
     ('internal_update_company'),
+    ('internal_upsert_bank_account'),
     ('list_company_user_directory'),
     ('register_auth_session'),
     ('release_upload_authorization_retirement_claim'),
@@ -192,7 +209,7 @@ select results_eq(
     ('rotate_app_session_after_reauthentication'),
     ('write_authenticated_audit_event'),
     ('write_security_event')$$,
-  'BFF preserva exatamente as quarenta boundaries aprovadas até Task 6'
+  'BFF preserva as cinquenta e uma boundaries aprovadas até Task 8'
 );
 select is_empty(
   $$select role_name || ':' || function.oid::regprocedure::text
@@ -236,7 +253,7 @@ $$;
 set local role service_role;
 select throws_ok(
   $$select * from private.begin_temporary_password_reset(
-      null::uuid, null::uuid, null::uuid, null::uuid
+      null::uuid, null::uuid, null::uuid, 'ADMIN_RESET_USER_REQUEST', null::uuid
     )$$,
   '42501', 'permission denied for schema private',
   'service_role é realmente recusada antes de executar a boundary'
@@ -245,7 +262,7 @@ reset role;
 set local role authenticated;
 select throws_ok(
   $$select * from private.begin_temporary_password_reset(
-      null::uuid, null::uuid, null::uuid, null::uuid
+      null::uuid, null::uuid, null::uuid, 'ADMIN_RESET_USER_REQUEST', null::uuid
     )$$,
   '42501', 'permission denied for function begin_temporary_password_reset',
   'authenticated é realmente recusado ao executar a boundary'
@@ -338,6 +355,7 @@ select throws_ok(
       '42000000-0000-4000-8000-000000000001',
       '42100000-0000-4000-8000-000000000010',
       '42000000-0000-4000-8000-000000000002',
+      'ADMIN_RESET_USER_REQUEST',
       '44000000-0000-4000-8000-000000000020'
     )$$,
   '23514', 'auth_password_actor_session_invalid',
@@ -356,6 +374,7 @@ select throws_ok(
       '42000000-0000-4000-8000-000000000001',
       '42100000-0000-4000-8000-000000000011',
       '42000000-0000-4000-8000-000000000002',
+      'ADMIN_RESET_USER_REQUEST',
       '44000000-0000-4000-8000-000000000021'
     )$$,
   '23514', 'auth_password_actor_session_invalid',
@@ -389,6 +408,7 @@ select throws_ok(
       '42000000-0000-4000-8000-000000000001',
       '42100000-0000-4000-8000-000000000001',
       '43000000-0000-4000-8000-000000000002',
+      'ADMIN_RESET_USER_REQUEST',
       '44000000-0000-4000-8000-000000000001'
     )$$,
   'P0002', 'auth_password_target_not_found',
@@ -399,6 +419,7 @@ select throws_ok(
       '42000000-0000-4000-8000-000000000001',
       '42100000-0000-4000-8000-000000000001',
       '43000000-0000-4000-8000-000000000099',
+      'ADMIN_RESET_USER_REQUEST',
       '44000000-0000-4000-8000-000000000002'
     )$$,
   'P0002', 'auth_password_target_not_found',
@@ -409,6 +430,7 @@ select throws_ok(
       '42000000-0000-4000-8000-000000000003',
       '42100000-0000-4000-8000-000000000003',
       '42000000-0000-4000-8000-000000000002',
+      'ADMIN_RESET_USER_REQUEST',
       '44000000-0000-4000-8000-000000000003'
     )$$,
   '42501', 'auth_password_reset_forbidden',
@@ -419,10 +441,39 @@ select throws_ok(
       '42000000-0000-4000-8000-000000000001',
       '42100000-0000-4000-8000-000000000001',
       '42000000-0000-4000-8000-000000000001',
+      'ADMIN_RESET_USER_REQUEST',
       '44000000-0000-4000-8000-000000000004'
     )$$,
   '42501', 'auth_password_reset_forbidden',
   'reset administrativo de si próprio é recusado'
+);
+
+select throws_ok(
+  $$select * from private.begin_temporary_password_reset(
+      '41000000-0000-4000-8000-000000000001',
+      '41100000-0000-4000-8000-000000000001',
+      '43000000-0000-4000-8000-000000000002',
+      'RAW FREE TEXT',
+      '44000000-0000-4000-8000-000000000009'
+    )$$,
+  '22023', 'auth_password_reset_reason_invalid',
+  'reason outside the closed administrative allowlist is rejected'
+);
+select results_eq(
+  $$select must_change_password, temporary_password_expires_at is null
+    from public.profiles
+    where user_id='43000000-0000-4000-8000-000000000002'$$,
+  $$values (false,true)$$,
+  'invalid reason cannot close the target profile'
+);
+select results_eq(
+  $$select
+      (select count(*)::integer from private.auth_password_operations
+       where correlation_id='44000000-0000-4000-8000-000000000009'),
+      (select count(*)::integer from public.audit_events
+       where correlation_id='44000000-0000-4000-8000-000000000009')$$,
+  $$values (0,0)$$,
+  'invalid reason creates neither operation nor audit event'
 );
 
 select lives_ok(
@@ -430,6 +481,7 @@ select lives_ok(
       '41000000-0000-4000-8000-000000000001',
       '41100000-0000-4000-8000-000000000001',
       '43000000-0000-4000-8000-000000000002',
+      'ADMIN_RESET_SECURITY_INCIDENT',
       '44000000-0000-4000-8000-000000000010'
     )$$,
   'super admin reserva reset de identidade empresarial'
@@ -439,6 +491,7 @@ select throws_ok(
       '41000000-0000-4000-8000-000000000001',
       '41100000-0000-4000-8000-000000000001',
       '43000000-0000-4000-8000-000000000002',
+      'ADMIN_RESET_USER_REQUEST',
       '44000000-0000-4000-8000-000000000011'
     )$$,
   '23505', 'auth_password_operation_in_progress',
@@ -479,6 +532,16 @@ select results_eq(
   'reserva e conclusão platform usam exatamente a correlação durável'
 );
 select results_eq(
+  $$select audit.action::text collate "default", audit.reason_code, audit.metadata
+    from public.audit_events audit
+    where audit.correlation_id='44000000-0000-4000-8000-000000000010'
+    order by audit.occurred_at,audit.id$$,
+  $$values
+    ('auth.temporary_password_reset_reserved','ADMIN_RESET_SECURITY_INCIDENT','{}'::jsonb),
+    ('auth.temporary_password_reset_completed',null::text,'{}'::jsonb)$$,
+  'request category persists only on the reserved audit event'
+);
+select results_eq(
   $$select count(*)::integer
     from private.auth_session_controls
     where user_id = '43000000-0000-4000-8000-000000000002'
@@ -492,6 +555,7 @@ select lives_ok(
       '42000000-0000-4000-8000-000000000001',
       '42100000-0000-4000-8000-000000000001',
       '42000000-0000-4000-8000-000000000002',
+      'ADMIN_RESET_ACCESS_RECOVERY',
       '44000000-0000-4000-8000-000000000005'
     )$$,
   'admin A reserva reset do membro A'
@@ -526,15 +590,16 @@ select results_eq(
   'reserva persiste somente estado e escopo autoritativos'
 );
 select results_eq(
-  $$select action::text collate "default", resource_id, metadata
+  $$select action::text collate "default", resource_id, reason_code, metadata
     from public.audit_events
     where correlation_id = '44000000-0000-4000-8000-000000000005'$$,
   $$values (
     'auth.temporary_password_reset_reserved',
     '42000000-0000-4000-8000-000000000002'::uuid,
+    'ADMIN_RESET_ACCESS_RECOVERY',
     '{}'::jsonb
   )$$,
-  'reserva audita sem senha ou metadata livre'
+  'reserva audita somente a categoria allowlisted, sem senha ou metadata livre'
 );
 
 -- O JWT antigo continua criptograficamente representável, mas a RLS o fecha.
@@ -551,6 +616,7 @@ select throws_ok(
       '42000000-0000-4000-8000-000000000001',
       '42100000-0000-4000-8000-000000000001',
       '42000000-0000-4000-8000-000000000002',
+      'ADMIN_RESET_USER_REQUEST',
       '44000000-0000-4000-8000-000000000012'
     )$$,
   '23505', 'auth_password_operation_in_progress',
@@ -646,6 +712,7 @@ select lives_ok(
       '42000000-0000-4000-8000-000000000001',
       '42100000-0000-4000-8000-000000000001',
       '42000000-0000-4000-8000-000000000002',
+      'ADMIN_RESET_USER_REQUEST',
       '44000000-0000-4000-8000-000000000007'
     )$$,
   'retry seguro cria uma nova reserva'
@@ -741,6 +808,7 @@ select lives_ok(
       '41000000-0000-4000-8000-000000000001',
       '41100000-0000-4000-8000-000000000001',
       '42000000-0000-4000-8000-000000000002',
+      'ADMIN_RESET_USER_REQUEST',
       '44000000-0000-4000-8000-000000000031'
     )$$,
   'super admin atual reconcilia reserva expirada de ator perdido'

@@ -163,6 +163,10 @@ from private.internal_reserve_company_provisioning(
   repeat('1',64),repeat('2',64),repeat('3',64),
   '83000000-0000-4000-8000-000000000203'
 ) operation;
+update auth.users set raw_app_meta_data=pg_catalog.jsonb_build_object(
+  'axsys_provisioning_operation_id',
+  (select operation_id from private.task5_test_company_operation_refs where label='cnpj-a')
+) where id='24000000-0000-4000-8000-000000000201';
 select private.internal_mark_provisioning_auth_created(
   (select operation_id from private.task5_test_company_operation_refs
     where label = 'cnpj-a'),
@@ -179,6 +183,10 @@ from private.internal_reserve_company_provisioning(
   repeat('4',64),repeat('5',64),repeat('6',64),
   '83000000-0000-4000-8000-000000000204'
 ) operation;
+update auth.users set raw_app_meta_data=pg_catalog.jsonb_build_object(
+  'axsys_provisioning_operation_id',
+  (select operation_id from private.task5_test_company_operation_refs where label='cnpj-b')
+) where id='24000000-0000-4000-8000-000000000202';
 select private.internal_mark_provisioning_auth_created(
   (select operation_id from private.task5_test_company_operation_refs
     where label = 'cnpj-b'),

@@ -327,7 +327,7 @@ begin
   from private.password_recovery_grants grant_row
   where grant_row.grant_hash = p_grant_hash
   for update;
-  v_now := clock_timestamp();
+  v_now := greatest(clock_timestamp(),v_grant.created_at);
   if not found
      or not v_auth_user_found
      or not v_auth_session_found
@@ -375,7 +375,7 @@ begin
     for key share;
     v_company_found := found;
   end if;
-  v_now := clock_timestamp();
+  v_now := greatest(clock_timestamp(),v_grant.created_at);
   if not v_company_found
      or v_grant.expires_at <= v_now
      or (v_auth_not_after is not null and v_auth_not_after <= v_now) then
@@ -391,7 +391,7 @@ begin
     and operation.status in ('reserved', 'auth_updated')
   for update;
   v_existing_operation_found := found;
-  v_now := clock_timestamp();
+  v_now := greatest(clock_timestamp(),v_grant.created_at);
   if v_grant.expires_at <= v_now
      or (v_auth_not_after is not null and v_auth_not_after <= v_now) then
     raise exception using
@@ -432,7 +432,7 @@ begin
     );
   end if;
 
-  v_now := clock_timestamp();
+  v_now := greatest(clock_timestamp(),v_grant.created_at);
   if v_grant.expires_at <= v_now
      or (v_auth_not_after is not null and v_auth_not_after <= v_now) then
     raise exception using
@@ -457,7 +457,7 @@ begin
   where profile.user_id = v_grant.user_id;
   perform private.revoke_auth_sessions(v_grant.user_id, null);
 
-  v_now := clock_timestamp();
+  v_now := greatest(clock_timestamp(),v_grant.created_at);
   if v_grant.expires_at <= v_now
      or (v_auth_not_after is not null and v_auth_not_after <= v_now) then
     raise exception using
@@ -483,7 +483,7 @@ begin
     'success', null, p_correlation_id, '{}', v_now
   );
 
-  v_now := clock_timestamp();
+  v_now := greatest(clock_timestamp(),v_grant.created_at);
   if v_grant.expires_at <= v_now
      or (v_auth_not_after is not null and v_auth_not_after <= v_now) then
     raise exception using

@@ -139,12 +139,14 @@ type UploadAuthorization = {
 }
 
 type CompanyUserDirectoryEntry = {
+  membershipId: string
   userId: string
   displayName: string
   email: string
   role: "company_admin" | "member"
   status: "active" | "suspended"
   modules: ("administrative" | "financial" | "certificates")[]
+  version: number
   createdAt: string
 }
 
@@ -210,8 +212,21 @@ export type CompanyDetailSnapshot = {
   company: CompanyListSnapshot
   admins: Array<{
     id: string
+    membershipId: string
+    targetUserId: string
     displayName: string
+    email: string
+    role: "company_admin"
     status: "active" | "suspended"
+    modules: ("administrative" | "financial" | "certificates")[]
+    version: number
+    mustChangePassword: boolean
+    temporaryPasswordExpiresAt: string | null
+    accessState:
+      | "active"
+      | "suspended"
+      | "password_change_required"
+      | "archived_company"
   }>
   bankAccounts: Array<{
     id: string
@@ -229,6 +244,37 @@ export type CompanyDetailSnapshot = {
     activeUsers: number
     bankAccounts: number
   }
+}
+
+export type ManagedCompanyUserSnapshot = {
+  membershipId: string
+  targetUserId: string
+  displayName: string
+  email: string
+  role: "company_admin" | "member"
+  status: "active" | "suspended"
+  modules: ("administrative" | "financial" | "certificates")[]
+  version: number
+  mustChangePassword: boolean
+  temporaryPasswordExpiresAt: string | null
+  accessState: string
+}
+
+export type BankAccountSummarySnapshot = {
+  id: string
+  companyId: string
+  bankCode: string
+  bankName: string
+  maskedBranch: string
+  maskedAccount: string
+  accountType: "checking" | "savings" | "payment"
+  holderName: string
+  maskedHolderDocument: string | null
+  status: "active" | "archived"
+  isDefault: boolean
+  version: number
+  createdAt: string
+  updatedAt: string
 }
 
 const companyListSnapshotSchema = z
@@ -258,8 +304,24 @@ const companyDetailSnapshotSchema = z
       z
         .object({
           id: z.uuid(),
+          membershipId: z.uuid(),
+          targetUserId: z.uuid(),
           displayName: z.string().min(2).max(120),
+          email: z.email().max(254),
+          role: z.literal("company_admin"),
           status: z.enum(["active", "suspended"]),
+          modules: z.array(
+            z.enum(["administrative", "financial", "certificates"]),
+          ),
+          version: z.int().positive(),
+          mustChangePassword: z.boolean(),
+          temporaryPasswordExpiresAt: z.iso.datetime({ offset: true }).nullable(),
+          accessState: z.enum([
+            "active",
+            "suspended",
+            "password_change_required",
+            "archived_company",
+          ]),
         })
         .strict(),
     ),
@@ -294,6 +356,82 @@ const reconciliationSnapshotSchema = z
     status: z.enum(["complete", "pending"]),
     failedUserIds: z.array(z.uuid()),
     attemptCount: z.int().nonnegative(),
+    updatedAt: z.iso.datetime({ offset: true }),
+  })
+  .strict()
+
+const memberAuthAccessReconciliationSchema = z
+  .object({
+    status: z.enum(["pending", "completed"]),
+    desiredState: z.enum(["active", "banned"]),
+    attemptCount: z.int().nonnegative(),
+  })
+  .strict()
+
+const provisioningOperationSnapshotSchema = z
+  .object({
+    id: z.uuid(),
+    status: z.enum([
+      "reserved",
+      "auth_created",
+      "committed",
+      "compensated",
+      "compensation_required",
+    ]),
+    authUserId: z.uuid().nullable(),
+  })
+  .strict()
+
+const managedCompanyUserSnapshotSchema = z
+  .object({
+    membershipId: z.uuid(),
+    targetUserId: z.uuid(),
+    displayName: z.string().min(2).max(120),
+    email: z.email().max(254),
+    role: z.enum(["company_admin", "member"]),
+    status: z.enum(["active", "suspended"]),
+    modules: z.array(z.enum(["administrative", "financial", "certificates"])),
+    version: z.int().positive(),
+    mustChangePassword: z.boolean(),
+    temporaryPasswordExpiresAt: z.iso.datetime({ offset: true }).nullable(),
+    accessState: z.enum([
+      "active",
+      "suspended",
+      "password_change_required",
+      "archived_company",
+    ]),
+  })
+  .strict()
+
+const companyUserDirectoryEntrySchema = z
+  .object({
+    membershipId: z.uuid(),
+    userId: z.uuid(),
+    displayName: z.string().min(2).max(120),
+    email: z.email().max(254),
+    role: z.enum(["company_admin", "member"]),
+    status: z.enum(["active", "suspended"]),
+    modules: z.array(z.enum(["administrative", "financial", "certificates"])),
+    version: z.int().positive(),
+    createdAt: z.iso.datetime({ offset: true }),
+  })
+  .strict()
+
+const bankAccountSummarySnapshotSchema = z
+  .object({
+    id: z.uuid(),
+    companyId: z.uuid(),
+    bankCode: z.string().regex(/^\d{3,8}$/u),
+    bankName: z.string().min(2).max(120),
+    maskedBranch: z.string().min(1).max(4),
+    maskedAccount: z.string().min(1).max(4),
+    accountType: z.enum(["checking", "savings", "payment"]),
+    holderName: z.string().min(2).max(160),
+    maskedHolderDocument: z.string().min(5).max(8).nullable(),
+    status: z.enum(["active", "archived"]),
+    isDefault: z.boolean(),
+    version: z.int().positive(),
+    createdAt: z.iso.datetime({ offset: true }),
     updatedAt: z.iso.datetime({ offset: true }),
   })
   .strict()
@@ -469,6 +607,11 @@ export const bffDb = {
     actorUserId: string
     sessionId: string
     targetUserId: string
+    requestReasonCode:
+      | "ADMIN_RESET_USER_REQUEST"
+      | "ADMIN_RESET_ACCESS_RECOVERY"
+      | "ADMIN_RESET_SECURITY_INCIDENT"
+      | "ADMIN_RESET_ADMINISTRATIVE_CORRECTION"
     correlationId: string
   }): Promise<{ operationId: string; expiresAt: string }> {
     const sql = await getSql()
@@ -478,6 +621,7 @@ export const bffDb = {
         ${input.actorUserId}::uuid,
         ${input.sessionId}::uuid,
         ${input.targetUserId}::uuid,
+        ${input.requestReasonCode},
         ${input.correlationId}::uuid
       )
     `
@@ -1209,6 +1353,175 @@ export const bffDb = {
     }
   },
 
+  async reserveCompanyAdminProvisioning(input: {
+    actorUserId: string
+    sessionId: string
+    companyId: string
+    idempotencyKeyHash: string
+    requestHash: string
+    subjectEmailHash: string
+    correlationId: string
+  }): Promise<CompanyProvisioningOperationSnapshot> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: CompanyProvisioningOperationSnapshot }]>`
+      select private.internal_reserve_company_admin_provisioning(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.companyId}::uuid,
+        ${input.idempotencyKeyHash},
+        ${input.requestHash},
+        ${input.subjectEmailHash},
+        ${input.correlationId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return provisioningOperationSnapshotSchema.parse(row.result)
+  },
+
+  async commitCompanyAdminProvisioning(input: {
+    actorUserId: string
+    sessionId: string
+    operationId: string
+    authUserId: string
+    companyId: string
+    displayName: string
+    email: string
+    modules: ("administrative" | "financial" | "certificates")[]
+    correlationId: string
+  }): Promise<ManagedCompanyUserSnapshot> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: ManagedCompanyUserSnapshot }]>`
+      select private.internal_commit_company_admin_provisioning(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.operationId}::uuid,
+        ${input.authUserId}::uuid,
+        ${input.companyId}::uuid,
+        ${input.displayName},
+        ${input.email},
+        ${input.modules}::public.module_key[],
+        ${input.correlationId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return managedCompanyUserSnapshotSchema.parse(row.result)
+  },
+
+  async findProvisioningAuthUser(input: {
+    actorUserId: string
+    sessionId: string
+    operationId: string
+    expectedEmail: string
+  }): Promise<string | null> {
+    const sql = await getSql()
+    const [row] = await sql<[{ authUserId: string | null }]>`
+      select private.internal_find_provisioning_auth_user(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.operationId}::uuid,
+        ${input.expectedEmail}
+      ) as "authUserId"
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return z.uuid().nullable().parse(row.authUserId)
+  },
+
+  async updatePlatformCompanyAdmin(input: {
+    actorUserId: string
+    sessionId: string
+    membershipId: string
+    displayName: string
+    status: "active" | "suspended"
+    modules: ("administrative" | "financial" | "certificates")[]
+    reason: string | null
+    expectedVersion: number
+    correlationId: string
+  }): Promise<ManagedCompanyUserSnapshot> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: ManagedCompanyUserSnapshot }]>`
+      select private.internal_platform_update_company_admin(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.membershipId}::uuid,
+        ${input.displayName},
+        ${input.status}::public.membership_status,
+        ${input.modules}::public.module_key[],
+        ${input.reason},
+        ${input.expectedVersion}::bigint,
+        ${input.correlationId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return managedCompanyUserSnapshotSchema.parse(row.result)
+  },
+
+  async getCompanyUser(input: {
+    actorUserId: string
+    sessionId: string
+    membershipId: string
+  }): Promise<ManagedCompanyUserSnapshot> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: ManagedCompanyUserSnapshot }]>`
+      select private.internal_get_company_user(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.membershipId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return managedCompanyUserSnapshotSchema.parse(row.result)
+  },
+
+  async getPlatformCompanyAdmin(input: {
+    actorUserId: string
+    sessionId: string
+    membershipId: string
+  }): Promise<ManagedCompanyUserSnapshot> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: ManagedCompanyUserSnapshot }]>`
+      select private.internal_get_platform_company_admin(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.membershipId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return managedCompanyUserSnapshotSchema.parse(row.result)
+  },
+
+  async completeMemberAuthAccessReconciliation(input: {
+    actorUserId: string
+    sessionId: string
+    membershipId: string
+    operationCorrelationId: string
+    succeeded: boolean
+    errorCode:
+      | "AUTH_ADMIN_FAILED"
+      | "AUTH_ADMIN_TIMEOUT"
+      | "AUTH_ADMIN_UNAVAILABLE"
+      | null
+    completionCorrelationId: string
+  }): Promise<{
+    status: "pending" | "completed"
+    desiredState: "active" | "banned"
+    attemptCount: number
+  }> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: unknown }]>`
+      select private.internal_complete_member_auth_access_reconciliation(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.membershipId}::uuid,
+        ${input.operationCorrelationId}::uuid,
+        ${input.succeeded},
+        ${input.errorCode},
+        ${input.completionCorrelationId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return memberAuthAccessReconciliationSchema.parse(row.result)
+  },
+
   async listCompanyUserDirectory(input: {
     actorUserId: string
     sessionId: string
@@ -1218,14 +1531,19 @@ export const bffDb = {
   }): Promise<CompanyUserDirectoryEntry[]> {
     const sql = await getSql()
     const rows = await sql<
-      (Omit<CompanyUserDirectoryEntry, "createdAt"> & { createdAt: Date })[]
+      (Omit<CompanyUserDirectoryEntry, "createdAt" | "version"> & {
+        createdAt: Date
+        version: number | string
+      })[]
     >`
-      select user_id as "userId",
+      select membership_id as "membershipId",
+             user_id as "userId",
              display_name as "displayName",
              email,
              role,
              status,
              modules,
+             version,
              created_at as "createdAt"
       from private.list_company_user_directory(
         ${input.actorUserId}::uuid,
@@ -1235,10 +1553,138 @@ export const bffDb = {
         ${input.searchQuery}
       )
     `
-    return rows.map((row) => ({
-      ...row,
-      modules: [...row.modules],
-      createdAt: row.createdAt.toISOString(),
-    }))
+    return z.array(companyUserDirectoryEntrySchema).parse(
+      rows.map((row) => ({
+        ...row,
+        modules: [...row.modules],
+        version: toSafeInteger(row.version),
+        createdAt: row.createdAt.toISOString(),
+      })),
+    )
+  },
+
+  async upsertBankAccount(input: {
+    actorUserId: string
+    sessionId: string
+    companyId: string
+    bankAccountId: string
+    bankCode: string
+    bankName: string
+    branch: { ciphertext: string; iv: string; tag: string; keyVersion: number }
+    branchLast4: string
+    account: { ciphertext: string; iv: string; tag: string; keyVersion: number }
+    accountLast4: string
+    accountType: "checking" | "savings" | "payment"
+    holderName: string
+    holderDocument: { ciphertext: string; iv: string; tag: string; keyVersion: number } | null
+    holderDocumentLast4: string | null
+    makeDefault: boolean
+    expectedVersion: number | null
+    correlationId: string
+  }): Promise<BankAccountSummarySnapshot> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: BankAccountSummarySnapshot }]>`
+      select private.internal_upsert_bank_account(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.companyId}::uuid,
+        ${input.bankAccountId}::uuid,
+        ${input.bankCode},
+        ${input.bankName},
+        ${input.branch.ciphertext},
+        ${input.branch.iv},
+        ${input.branch.tag},
+        ${input.branch.keyVersion},
+        ${input.branchLast4},
+        ${input.account.ciphertext},
+        ${input.account.iv},
+        ${input.account.tag},
+        ${input.account.keyVersion},
+        ${input.accountLast4},
+        ${input.accountType}::public.bank_account_type,
+        ${input.holderName},
+        ${input.holderDocument?.ciphertext ?? null},
+        ${input.holderDocument?.iv ?? null},
+        ${input.holderDocument?.tag ?? null},
+        ${input.holderDocument?.keyVersion ?? null},
+        ${input.holderDocumentLast4},
+        ${input.makeDefault},
+        ${input.expectedVersion}::bigint,
+        ${input.correlationId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return bankAccountSummarySnapshotSchema.parse(row.result)
+  },
+
+  async setDefaultBankAccount(input: {
+    actorUserId: string
+    sessionId: string
+    companyId: string
+    bankAccountId: string
+    expectedVersion: number
+    correlationId: string
+  }): Promise<BankAccountSummarySnapshot> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: BankAccountSummarySnapshot }]>`
+      select private.internal_set_default_bank_account(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.companyId}::uuid,
+        ${input.bankAccountId}::uuid,
+        ${input.expectedVersion}::bigint,
+        ${input.correlationId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return bankAccountSummarySnapshotSchema.parse(row.result)
+  },
+
+  async archiveBankAccount(input: {
+    actorUserId: string
+    sessionId: string
+    companyId: string
+    bankAccountId: string
+    replacementDefaultId: string | null
+    reasonCode:
+      | "BANK_ARCHIVE_ACCOUNT_CLOSED"
+      | "BANK_ARCHIVE_BANK_CHANGED"
+      | "BANK_ARCHIVE_DATA_CORRECTION"
+      | "BANK_ARCHIVE_SECURITY_RESPONSE"
+    expectedVersion: number
+    correlationId: string
+  }): Promise<BankAccountSummarySnapshot> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: BankAccountSummarySnapshot }]>`
+      select private.internal_archive_bank_account(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.companyId}::uuid,
+        ${input.bankAccountId}::uuid,
+        ${input.replacementDefaultId}::uuid,
+        ${input.reasonCode},
+        ${input.expectedVersion}::bigint,
+        ${input.correlationId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return bankAccountSummarySnapshotSchema.parse(row.result)
+  },
+
+  async listPlatformBankAccounts(input: {
+    actorUserId: string
+    sessionId: string
+    companyId: string
+  }): Promise<BankAccountSummarySnapshot[]> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: BankAccountSummarySnapshot[] }]>`
+      select private.internal_list_company_bank_accounts(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.companyId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return bankAccountSummarySnapshotSchema.array().parse(row.result)
   },
 }

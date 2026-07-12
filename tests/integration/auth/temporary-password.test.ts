@@ -509,6 +509,7 @@ describe.sequential("Task 12 real temporary-password saga", () => {
         {
           targetUserId: fixture.memberB.userId,
           password: "Axsys-Temp-CrossTenant-42!",
+          reasonCode: "ADMIN_RESET_USER_REQUEST",
         },
         fixture.adminA.jar,
       ),
@@ -519,6 +520,7 @@ describe.sequential("Task 12 real temporary-password saga", () => {
         {
           targetUserId: randomUUID(),
           password: "Axsys-Temp-UnknownUser-42!",
+          reasonCode: "ADMIN_RESET_USER_REQUEST",
         },
         fixture.adminA.jar,
       ),
@@ -540,6 +542,7 @@ describe.sequential("Task 12 real temporary-password saga", () => {
         {
           targetUserId: fixture.memberA.userId,
           password: "Axsys-Temp-Ordinary-42!",
+          reasonCode: "ADMIN_RESET_USER_REQUEST",
         },
         fixture.memberB.jar,
       ),
@@ -558,6 +561,7 @@ describe.sequential("Task 12 real temporary-password saga", () => {
         {
           targetUserId: fixture.memberA.userId,
           password: "Axsys-Temp-StaleAdmin-42!",
+          reasonCode: "ADMIN_RESET_USER_REQUEST",
         },
         fixture.adminA.jar,
       ),
@@ -576,12 +580,14 @@ describe.sequential("Task 12 real temporary-password saga", () => {
         actorUserId: actor.userId,
         sessionId: actor.sessionId,
         targetUserId: fixture.memberA.userId,
+        requestReasonCode: "ADMIN_RESET_USER_REQUEST",
         correlationId: firstCorrelation,
       }),
       bffDb.beginTemporaryPasswordReset({
         actorUserId: actor.userId,
         sessionId: actor.sessionId,
         targetUserId: fixture.memberA.userId,
+        requestReasonCode: "ADMIN_RESET_USER_REQUEST",
         correlationId: secondCorrelation,
       }),
     ])
@@ -624,6 +630,7 @@ describe.sequential("Task 12 real temporary-password saga", () => {
         {
           targetUserId: fixture.memberA.userId,
           password: temporaryPassword,
+          reasonCode: "ADMIN_RESET_USER_REQUEST",
         },
         fixture.adminA.jar,
       ),
@@ -721,6 +728,7 @@ describe.sequential("Task 12 real temporary-password saga", () => {
               actor,
               targetUserId: fixture.memberA.userId,
               password: failureCase.password,
+              reasonCode: "ADMIN_RESET_USER_REQUEST",
               correlationId,
             },
             failureCase.dependencies,
@@ -757,6 +765,7 @@ describe.sequential("Task 12 real temporary-password saga", () => {
           actor,
           targetUserId: fixture.memberA.userId,
           password: passwords[3],
+          reasonCode: "ADMIN_RESET_USER_REQUEST",
           correlationId: finalCorrelation,
         }),
       ).resolves.toMatchObject({ status: "completed" })

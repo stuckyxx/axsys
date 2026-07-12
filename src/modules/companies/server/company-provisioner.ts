@@ -73,6 +73,9 @@ export type CompanyProvisioningDependencies = Readonly<{
       operationId: string
       subjectEmailHash: string
       fingerprintEmail(email: string): string
+      actorUserId: string
+      sessionId: string
+      expectedEmail: string
     }): Promise<{ id: string } | null>
     deleteUser(userId: string): Promise<void>
     banUser(userId: string): Promise<void>
@@ -209,6 +212,9 @@ export async function provisionCompany(
         subjectEmailHash,
         fingerprintEmail: (email) =>
           deps.fingerprint("company-first-admin-email", email),
+        actorUserId: command.actorUserId,
+        sessionId: command.sessionId,
+        expectedEmail: input.firstAdmin.email,
       })
     let recovered: { id: string } | null = null
     try {
@@ -312,7 +318,19 @@ export async function provisionCompany(
 }
 
 export function getCompanyProvisioningDependencies(): CompanyProvisioningDependencies {
-  const auth = getAuthAdminGateway()
+  const gateway = getAuthAdminGateway()
+  const auth: CompanyProvisioningDependencies["auth"] = {
+    ...gateway,
+    async findProvisionedUser(input) {
+      const id = await bffDb.findProvisioningAuthUser({
+        actorUserId: input.actorUserId,
+        sessionId: input.sessionId,
+        operationId: input.operationId,
+        expectedEmail: input.expectedEmail,
+      })
+      return id === null ? null : { id }
+    },
+  }
   return {
     repository: {
       async reserve(input) {

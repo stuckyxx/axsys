@@ -7,7 +7,10 @@ import type {
   AccessContext,
   ModuleKey,
 } from "@/modules/auth/domain/access-context"
-import { getAccessContext } from "@/modules/auth/server/get-access-context"
+import {
+  getAccessContext,
+  getCompanyApiAccessContext,
+} from "@/modules/auth/server/get-access-context"
 
 const MAX_RECENT_AUTHENTICATION_AGE_SECONDS = 600
 const AUTHENTICATION_CLOCK_SKEW_SECONDS = 60
@@ -18,6 +21,14 @@ function reauthenticationRequired(): ApiError {
     403,
     "Confirme sua senha novamente para continuar.",
   )
+}
+
+function moduleForbidden(): ApiError {
+  return new ApiError("MODULE_FORBIDDEN", 403, "Módulo não autorizado.")
+}
+
+function companyArchived(): ApiError {
+  return new ApiError("COMPANY_ARCHIVED", 403, "Empresa arquivada.")
 }
 
 export async function requireAccessContext(): Promise<AccessContext> {
@@ -65,14 +76,35 @@ export async function requireCompanyContext(requiredModule?: ModuleKey) {
     redirect("/platform")
   }
   if (requiredModule && !context.modules.includes(requiredModule)) {
-    throw new ApiError(
-      "MODULE_FORBIDDEN",
-      403,
-      "Módulo não autorizado.",
-    )
+    throw moduleForbidden()
   }
 
   return context
+}
+
+export async function requireCompanyApiContext(requiredModule?: ModuleKey) {
+  const resolution = await getCompanyApiAccessContext()
+  if (resolution.status === "anonymous") {
+    throw new ApiError("AUTH_REQUIRED", 401, "Faça login para continuar.")
+  }
+  if (resolution.status === "password_change") {
+    throw new ApiError(
+      "PASSWORD_CHANGE_REQUIRED",
+      403,
+      "Altere sua senha provisória para continuar.",
+    )
+  }
+  if (resolution.status === "company_inactive") {
+    throw companyArchived()
+  }
+  if (resolution.context.kind !== "company") {
+    throw new ApiError("COMPANY_FORBIDDEN", 403, "Operação não autorizada.")
+  }
+  if (requiredModule && !resolution.context.modules.includes(requiredModule)) {
+    throw moduleForbidden()
+  }
+
+  return resolution.context
 }
 
 export function requireRecentAuthentication(

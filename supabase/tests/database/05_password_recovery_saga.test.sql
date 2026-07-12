@@ -243,8 +243,13 @@ select results_eq(
       )
       and has_function_privilege(role_name, function.oid, 'EXECUTE')
     order by role_name, function.oid::regprocedure::text$$,
-  $$values ('authenticated','public.issue_password_recovery_grant(text)')$$,
-  'superfície pública efetiva contém somente o RPC recovery autenticado'
+  $$values
+    ('authenticated','public.company_commit_member_provisioning(uuid,uuid,text,text,membership_role,module_key[],uuid)'),
+    ('authenticated','public.company_get_api_access_context()'),
+    ('authenticated','public.company_reserve_member_provisioning(text,text,text,uuid)'),
+    ('authenticated','public.company_update_membership(uuid,text,membership_role,membership_status,module_key[],text,bigint,uuid)'),
+    ('authenticated','public.issue_password_recovery_grant(text)')$$,
+  'superfície pública efetiva contém somente os cinco RPCs autenticados aprovados'
 );
 select hasnt_function(
   'private'::name,

@@ -426,7 +426,7 @@ select results_eq(
            array(select pg_catalog.jsonb_object_keys(result->'company')
                  order by 1),
            result->'admins',result->'bankAccounts',result->'counters',
-           result::text !~* '(ciphertext|holder|userId|password)'
+           result::text !~* '(ciphertext|holder)'
     from company_management_results where label='detail'$$,
   $$values (
     array['admins','bankAccounts','company','counters']::text[],
@@ -434,12 +434,12 @@ select results_eq(
       'cnpj','contactEmail','contactPhone','createdAt','id','legalName',
       'status','timezone','tradeName','updatedAt','version'
     ]::text[],
-    '[{"id":"45000000-0000-4000-8000-000000000101","status":"active","displayName":"active-company-admin"}]'::jsonb,
+    '[{"id":"45000000-0000-4000-8000-000000000101","role":"company_admin","email":"active-company-admin@example.test","status":"active","modules":["administrative"],"version":1,"targetUserId":"25000000-0000-4000-8000-000000000101","accessState":"active","displayName":"active-company-admin","membershipId":"45000000-0000-4000-8000-000000000101","mustChangePassword":false,"temporaryPasswordExpiresAt":null}]'::jsonb,
     '[{"id":"55000000-0000-4000-8000-000000000101","status":"active","version":1,"bankCode":"001","bankName":"Banco Seguro","isDefault":true,"accountType":"checking","branchLast4":"0123","accountLast4":"9876"}]'::jsonb,
     '{"activeAdmins":1,"activeUsers":1,"bankAccounts":1}'::jsonb,
     true
   )$$,
-  'detail exposes only masked bank data, display name and aggregate counters'
+  'detail exposes safe administrator controls, masked bank data and aggregate counters'
 );
 select throws_ok(
   $$select private.internal_list_companies(

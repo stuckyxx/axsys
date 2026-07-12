@@ -77,7 +77,7 @@ export function readEncryptionKey(name: string, encoded = process.env[name]): Bu
 }
 
 export function encryptValue(
-  plaintext: string,
+  plaintext: string | Buffer,
   key: Buffer,
   keyVersion: number,
   additionalAuthenticatedData: string,
@@ -87,7 +87,10 @@ export function encryptValue(
   const iv = randomBytes(GCM_IV_BYTES)
   const cipher = createCipheriv("aes-256-gcm", key, iv)
   cipher.setAAD(aad)
-  const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()])
+  const encryptedChunk = Buffer.isBuffer(plaintext)
+    ? cipher.update(plaintext)
+    : cipher.update(plaintext, "utf8")
+  const ciphertext = Buffer.concat([encryptedChunk, cipher.final()])
 
   return {
     ciphertext: ciphertext.toString("base64"),

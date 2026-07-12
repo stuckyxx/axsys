@@ -140,6 +140,7 @@ describe("Task 12 temporary-password handlers", () => {
       request("/api/auth/temporary-password", {
         targetUserId: TARGET_ID,
         password: PASSWORD,
+        reasonCode: "ADMIN_RESET_USER_REQUEST",
       }),
     )
 
@@ -154,6 +155,7 @@ describe("Task 12 temporary-password handlers", () => {
       actor,
       targetUserId: TARGET_ID,
       password: PASSWORD,
+      reasonCode: "ADMIN_RESET_USER_REQUEST",
       correlationId: "65000000-0000-4000-8000-000000000001",
     })
     expect(mocks.assertMutationOrigin.mock.invocationCallOrder[0]).toBeLessThan(
@@ -177,6 +179,7 @@ describe("Task 12 temporary-password handlers", () => {
       request("/api/auth/temporary-password", {
         targetUserId: TARGET_ID,
         password: PASSWORD,
+        reasonCode: "ADMIN_RESET_USER_REQUEST",
       }),
     )
 
@@ -194,6 +197,7 @@ describe("Task 12 temporary-password handlers", () => {
       request("/api/auth/temporary-password", {
         targetUserId: TARGET_ID,
         password: PASSWORD,
+        reasonCode: "ADMIN_RESET_USER_REQUEST",
       }),
     )
 
@@ -210,6 +214,7 @@ describe("Task 12 temporary-password handlers", () => {
       request("/api/auth/temporary-password", {
         targetUserId: TARGET_ID,
         password: PASSWORD,
+        reasonCode: "ADMIN_RESET_USER_REQUEST",
         companyId: "forged",
         actorUserId: "forged",
       }),

@@ -1,4 +1,5 @@
 import { z } from "@/lib/validation/zod"
+import { ADMINISTRATIVE_RESET_REASON_CODES } from "@/modules/auth/domain/administrative-reset-reason"
 
 const email = z.string().trim().toLowerCase().email().max(254)
 const password = z.string().min(1).max(128)
@@ -28,6 +29,7 @@ export const temporaryPasswordSchema = z
   .object({
     targetUserId: z.uuid(),
     password,
+    reasonCode: z.enum(ADMINISTRATIVE_RESET_REASON_CODES),
   })
   .strict()
 

@@ -15,6 +15,7 @@ vi.mock("@/lib/supabase/server", () => ({
 
 import {
   getAccessContext,
+  getCompanyApiAccessContext,
   type AccessResolution,
 } from "@/modules/auth/server/get-access-context"
 
@@ -78,6 +79,7 @@ function claimsResponse(overrides: Record<string, unknown> = {}) {
 function createClient(options?: {
   claims?: unknown
   tables?: Partial<Record<TableName, QueryResult>>
+  companyApiContext?: QueryResult
 }) {
   const tableResults: Record<TableName, QueryResult> = {
     profiles: result(PROFILE),
@@ -115,10 +117,22 @@ function createClient(options?: {
 
     return builder
   })
-  const client = { auth: { getClaims }, from }
+  const rpc = vi.fn(async () =>
+    options?.companyApiContext ??
+    result({
+      companyId: COMPANY_ID,
+      membershipId: MEMBERSHIP_ID,
+      role: "company_admin",
+      modules: ["financial"],
+      companyStatus: "active",
+      mustChangePassword: false,
+      temporaryPasswordExpiresAt: null,
+    }),
+  )
+  const client = { auth: { getClaims }, from, rpc }
   mocks.createServerSupabase.mockResolvedValue(client)
 
-  return { client, getClaims, queries }
+  return { client, getClaims, queries, rpc }
 }
 
 function expectAnonymous(resolution: AccessResolution) {
@@ -476,11 +490,40 @@ describe("getAccessContext", () => {
     ["missing membership", { platform_roles: result(null), company_memberships: result(null) }],
     ["suspended membership", { platform_roles: result(null), company_memberships: result({ ...MEMBERSHIP, status: "suspended" }) }],
     ["malformed membership role", { platform_roles: result(null), company_memberships: result({ ...MEMBERSHIP, role: "owner" }) }],
-    ["archived company", { platform_roles: result(null), companies: result({ status: "archived" }) }],
     ["malformed module row", { platform_roles: result(null), member_modules: result([{ module: "root" }]) }],
   ])("fails closed for %s", async (_name, tables) => {
     createClient({ tables })
     expectAnonymous(await getAccessContext())
+  })
+
+  it("preserves an archived-company state only when RLS returns that company row", async () => {
+    const tables = {
+      platform_roles: result(null),
+      companies: result({ status: "archived" }),
+    }
+    createClient({ tables })
+
+    await expect(getAccessContext()).resolves.toEqual({ status: "anonymous" })
+
+    createClient({
+      tables: {
+        ...tables,
+      },
+      companyApiContext: result({
+        companyId: COMPANY_ID,
+        membershipId: MEMBERSHIP_ID,
+        role: "company_admin",
+        modules: ["financial"],
+        companyStatus: "archived",
+        mustChangePassword: false,
+        temporaryPasswordExpiresAt: null,
+      }),
+    })
+
+    await expect(getCompanyApiAccessContext()).resolves.toEqual({
+      status: "company_inactive",
+      reason: "archived",
+    })
   })
 
   it.each([

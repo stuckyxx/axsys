@@ -9,11 +9,6 @@ export type AuthAdminGateway = Readonly<{
     emailConfirm: true
     provisioningOperationId: string
   }): Promise<{ id: string }>
-  findProvisionedUser(input: {
-    operationId: string
-    subjectEmailHash: string
-    fingerprintEmail(email: string): string
-  }): Promise<{ id: string } | null>
   banUser(userId: string): Promise<void>
   unbanUser(userId: string): Promise<void>
   deleteUser(userId: string): Promise<void>
@@ -27,17 +22,6 @@ type AuthAdminClient = Readonly<{
     app_metadata: { axsys_provisioning_operation_id: string }
   }): Promise<{
     data: { user: { id: string } | null }
-    error: unknown | null
-  }>
-  listUsers(input: { page: number; perPage: 100 }): Promise<{
-    data: {
-      users: Array<{
-        id: string
-        email?: string
-        app_metadata?: Record<string, unknown>
-      }>
-      nextPage?: number | null
-    }
     error: unknown | null
   }>
   updateUserById(
@@ -88,32 +72,6 @@ export function createAuthAdminGateway(
       assertSuccess(result.error)
       if (result.data.user === null) throw new Error(AUTH_ADMIN_FAILURE)
       return { id: result.data.user.id }
-    },
-
-    async findProvisionedUser(input) {
-      let page = 1
-      for (let scannedPages = 0; scannedPages < 1_000; scannedPages += 1) {
-        const result = await admin.listUsers({ page, perPage: 100 })
-        assertSuccess(result.error)
-        for (const user of result.data.users) {
-          if (
-            user.app_metadata?.axsys_provisioning_operation_id ===
-              input.operationId &&
-            typeof user.email === "string" &&
-            input.fingerprintEmail(user.email.toLowerCase()) ===
-              input.subjectEmailHash
-          ) {
-            return { id: user.id }
-          }
-        }
-        const nextPage = result.data.nextPage ?? null
-        if (nextPage === null) return null
-        if (!Number.isSafeInteger(nextPage) || nextPage <= page) {
-          throw new Error(AUTH_ADMIN_FAILURE)
-        }
-        page = nextPage
-      }
-      throw new Error(AUTH_ADMIN_FAILURE)
     },
 
     async banUser(userId) {

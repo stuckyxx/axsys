@@ -12,9 +12,10 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe("bffDb boundary", () => {
-  it("exports only the forty typed application database operations", () => {
+  it("exports only the fifty-one typed application database operations", () => {
     expect(Object.keys(bffDb).sort()).toEqual([
       "activateFileUploadAuthorization",
+      "archiveBankAccount",
       "assertAuthSession",
       "authorizeImageFileDownload",
       "beginFileFinalization",
@@ -24,9 +25,11 @@ describe("bffDb boundary", () => {
       "cancelUnissuedFileReservation",
       "claimUploadAuthorizationsForRetirement",
       "clearRateLimit",
+      "commitCompanyAdminProvisioning",
       "commitCompanyProvisioning",
       "completeCompanyAccessReconciliation",
       "completeDownloadAudit",
+      "completeMemberAuthAccessReconciliation",
       "completePasswordRecovery",
       "completeTemporaryPasswordChange",
       "completeTemporaryPasswordReset",
@@ -36,9 +39,13 @@ describe("bffDb boundary", () => {
       "failPasswordRecovery",
       "failTemporaryPasswordReset",
       "finalizeFileUpload",
+      "findProvisioningAuthUser",
       "getCompanyDetail",
+      "getCompanyUser",
+      "getPlatformCompanyAdmin",
       "listCompanies",
       "listCompanyUserDirectory",
+      "listPlatformBankAccounts",
       "markFileCleanupRequired",
       "markProvisioningAuthCreated",
       "markProvisioningCompensation",
@@ -46,12 +53,16 @@ describe("bffDb boundary", () => {
       "rejectFileUpload",
       "releaseFileFinalizationForRetry",
       "releaseUploadAuthorizationRetirementClaim",
+      "reserveCompanyAdminProvisioning",
       "reserveCompanyProvisioning",
       "reserveImageUploadIntent",
       "revokeSessionsAndWriteLogout",
       "rotateAppSessionAfterReauthentication",
       "setCompanyStatus",
+      "setDefaultBankAccount",
       "updateCompany",
+      "updatePlatformCompanyAdmin",
+      "upsertBankAccount",
       "writeAuthenticatedAuditEvent",
       "writeSecurityEvent",
     ])
@@ -176,6 +187,11 @@ describe("bffDb boundary", () => {
           actorUserId: string
           sessionId: string
           targetUserId: string
+          requestReasonCode:
+            | "ADMIN_RESET_USER_REQUEST"
+            | "ADMIN_RESET_ACCESS_RECOVERY"
+            | "ADMIN_RESET_SECURITY_INCIDENT"
+            | "ADMIN_RESET_ADMINISTRATIVE_CORRECTION"
           correlationId: string
         },
       ]
@@ -315,12 +331,14 @@ describe("bffDb boundary", () => {
     expectTypeOf(bffDb.listCompanyUserDirectory).returns.toEqualTypeOf<
       Promise<
         {
+          membershipId: string
           userId: string
           displayName: string
           email: string
           role: "company_admin" | "member"
           status: "active" | "suspended"
           modules: ("administrative" | "financial" | "certificates")[]
+          version: number
           createdAt: string
         }[]
       >
@@ -379,20 +397,31 @@ describe("bffDb boundary", () => {
       "fail_closed_login_session",
       "fail_password_recovery",
       "fail_temporary_password_reset",
+      "internal_archive_bank_account",
       "internal_begin_file_finalization",
+      "internal_commit_company_admin_provisioning",
       "internal_commit_company_provisioning",
       "internal_complete_company_access_reconciliation",
+      "internal_complete_member_auth_access_reconciliation",
       "internal_finalize_file_upload",
+      "internal_find_provisioning_auth_user",
       "internal_get_company_detail",
+      "internal_get_company_user",
+      "internal_get_platform_company_admin",
       "internal_list_companies",
+      "internal_list_company_bank_accounts",
       "internal_mark_file_cleanup_required",
       "internal_mark_provisioning_auth_created",
       "internal_mark_provisioning_compensation",
+      "internal_platform_update_company_admin",
       "internal_reject_file_upload",
       "internal_release_file_finalization_for_retry",
+      "internal_reserve_company_admin_provisioning",
       "internal_reserve_company_provisioning",
       "internal_set_company_status",
+      "internal_set_default_bank_account",
       "internal_update_company",
+      "internal_upsert_bank_account",
       "list_company_user_directory",
       "register_auth_session",
       "release_upload_authorization_retirement_claim",

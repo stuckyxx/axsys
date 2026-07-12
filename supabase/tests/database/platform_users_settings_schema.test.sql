@@ -471,10 +471,11 @@ select results_eq(
       and (grant_item.grantee = 0 or grantee.rolname in ('anon','authenticated','service_role','axsys_bff'))
     order by type.typname, coalesce(grantee.rolname, 'PUBLIC'), grant_item.privilege_type$$,
   $$values
+    ('bank_account_type:axsys_bff:USAGE'),
     ('company_status:axsys_bff:USAGE'),
     ('module_key:axsys_bff:USAGE'),
     ('provisioning_status:axsys_bff:USAGE')$$,
-  'enum ACL catalogs expose only the three typed BFF boundary grants'
+  'enum ACL catalogs expose only the four typed BFF boundary grants'
 );
 
 select results_eq(
@@ -491,10 +492,11 @@ select results_eq(
       and has_type_privilege(role_name, type.oid, 'USAGE')
     order by role_name, type.typname$$,
   $$values
+    ('axsys_bff:bank_account_type'),
     ('axsys_bff:company_status'),
     ('axsys_bff:module_key'),
     ('axsys_bff:provisioning_status')$$,
-  'role inheritance exposes only the three typed BFF boundary enums'
+  'role inheritance exposes only the four typed BFF boundary enums'
 );
 
 select results_eq(

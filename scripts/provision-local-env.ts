@@ -211,6 +211,70 @@ end
 $$;
 
 do $$
+declare
+  v_signature text;
+  v_function_oid oid;
+  v_expected_volatility "char";
+begin
+  foreach v_signature in array array[
+    'public.company_reserve_member_provisioning(text,text,text,uuid)',
+    'public.company_commit_member_provisioning(uuid,uuid,text,text,membership_role,module_key[],uuid)',
+    'public.company_update_membership(uuid,text,membership_role,membership_status,module_key[],text,bigint,uuid)',
+    'public.company_get_api_access_context()'
+  ] loop
+    v_function_oid := to_regprocedure(v_signature);
+    if v_function_oid is null then
+      continue;
+    end if;
+    v_expected_volatility := case
+      when v_signature = 'public.company_get_api_access_context()' then 's'::"char"
+      else 'v'::"char"
+    end;
+    if 1 <> (
+      select count(*)
+      from pg_proc function
+      join pg_namespace namespace on namespace.oid=function.pronamespace
+      join pg_roles owner_role on owner_role.oid=function.proowner
+      join pg_language language on language.oid=function.prolang
+      where function.oid=v_function_oid
+        and namespace.nspname='public'
+        and owner_role.rolname='postgres'
+        and language.lanname='plpgsql'
+        and function.prokind='f'
+        and function.provolatile=v_expected_volatility
+        and function.prosecdef
+        and not function.proretset
+        and function.prorettype='jsonb'::regtype
+        and function.proconfig=array['search_path=""']::text[]
+        and not exists (
+          select 1 from pg_depend dependency
+          where dependency.classid='pg_proc'::regclass
+            and dependency.objid=function.oid
+            and dependency.deptype='e'
+        )
+    ) then
+      raise exception 'company membership RPC catalog assertion failed';
+    end if;
+    execute format(
+      'revoke execute on function %s from public, anon, authenticated, service_role, axsys_bff',
+      v_function_oid::regprocedure
+    );
+    execute format(
+      'grant execute on function %s to authenticated',
+      v_function_oid::regprocedure
+    );
+    if not has_function_privilege('authenticated',v_function_oid,'EXECUTE')
+       or exists (
+         select 1 from unnest(array['public','anon','service_role','axsys_bff']) role_name
+         where has_function_privilege(role_name,v_function_oid,'EXECUTE')
+       ) then
+      raise exception 'company membership RPC privilege assertion failed';
+    end if;
+  end loop;
+end
+$$;
+
+do $$
 begin
   if exists (select 1 from pg_namespace where nspname = 'private') then
     revoke all privileges on all functions in schema private

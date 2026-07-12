@@ -12,11 +12,13 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/modules/auth/server/get-access-context", () => ({
   getAccessContext: mocks.getAccessContext,
+  getCompanyApiAccessContext: mocks.getAccessContext,
 }))
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }))
 
 import {
   requireAccessContext,
+  requireCompanyApiContext,
   requireCompanyContext,
   requirePlatformContext,
   requireRecentAuthentication,
@@ -114,6 +116,63 @@ describe("auth guards", () => {
       code: "MODULE_FORBIDDEN",
       status: 403,
       message: "Módulo não autorizado.",
+    })
+  })
+
+  it.each([
+    [
+      "anonymous",
+      { status: "anonymous" },
+      { code: "AUTH_REQUIRED", status: 401 },
+    ],
+    [
+      "temporary password",
+      {
+        status: "password_change",
+        userId: "11111111-1111-4111-8111-111111111111",
+        expired: false,
+      },
+      { code: "PASSWORD_CHANGE_REQUIRED", status: 403 },
+    ],
+    [
+      "archived company",
+      { status: "company_inactive", reason: "archived" },
+      { code: "COMPANY_ARCHIVED", status: 403 },
+    ],
+  ])("returns an API error without redirecting for %s", async (_name, resolution, error) => {
+    mocks.getAccessContext.mockResolvedValueOnce(resolution)
+
+    await expect(requireCompanyApiContext()).rejects.toMatchObject(error)
+    expect(mocks.redirect).not.toHaveBeenCalled()
+  })
+
+  it("keeps platform users out of company APIs without redirecting", async () => {
+    mocks.getAccessContext.mockResolvedValueOnce({
+      status: "authenticated",
+      context: createPlatformContext(),
+    })
+
+    await expect(requireCompanyApiContext()).rejects.toMatchObject({
+      code: "COMPANY_FORBIDDEN",
+      status: 403,
+    })
+    expect(mocks.redirect).not.toHaveBeenCalled()
+  })
+
+  it("returns the DB-derived company context and enforces optional modules", async () => {
+    const context = {
+      ...createCompanyContext(),
+      modules: Object.freeze(["financial"] as const),
+    }
+    mocks.getAccessContext.mockResolvedValue({
+      status: "authenticated",
+      context,
+    })
+
+    await expect(requireCompanyApiContext("financial")).resolves.toBe(context)
+    await expect(requireCompanyApiContext("administrative")).rejects.toMatchObject({
+      code: "MODULE_FORBIDDEN",
+      status: 403,
     })
   })
 

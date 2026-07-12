@@ -41,6 +41,7 @@ export async function POST(request: Request): Promise<Response> {
           actor: resolution.context,
           targetUserId: input.targetUserId,
           password: input.password,
+          reasonCode: input.reasonCode,
           correlationId,
         }),
       ),

@@ -6,6 +6,7 @@ import { getAdminSupabase } from "@/lib/supabase/admin"
 import type { AccessContext } from "@/modules/auth/domain/access-context"
 import { requireRecentAuthentication } from "@/modules/auth/server/guards"
 import { validatePassword } from "@/modules/auth/server/password-policy"
+import type { AdministrativeResetReasonCode } from "@/modules/auth/domain/administrative-reset-reason"
 
 type TemporaryPasswordFailureReason =
   | "AUTH_CALL_NOT_ATTEMPTED"
@@ -22,6 +23,7 @@ type SetTemporaryPasswordCommand = Readonly<{
   actor: AccessContext
   targetUserId: string
   password: string
+  reasonCode: AdministrativeResetReasonCode
   correlationId: string
 }>
 
@@ -118,6 +120,7 @@ export async function setTemporaryPassword(
       actorUserId: command.actor.userId,
       sessionId: command.actor.sessionId,
       targetUserId: command.targetUserId,
+      requestReasonCode: command.reasonCode,
       correlationId: command.correlationId,
     })
   } catch (error) {

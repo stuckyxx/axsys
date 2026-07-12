@@ -19,6 +19,9 @@ export type RateLimitBucket =
   | "file-download-user"
   | "platform-company-create"
   | "platform-company-status"
+  | "user-provisioning"
+  | "administrative-password-reset"
+  | "bank-account-mutation"
 
 export type AccountFailureRateLimitBucket =
   | "login-account-failure"
@@ -80,6 +83,21 @@ const RATE_LIMIT_POLICIES = Object.freeze({
   }),
   "platform-company-status": Object.freeze({
     limit: 20,
+    windowSeconds: 3_600,
+    blockSeconds: 3_600,
+  }),
+  "user-provisioning": Object.freeze({
+    limit: 20,
+    windowSeconds: 3_600,
+    blockSeconds: 3_600,
+  }),
+  "administrative-password-reset": Object.freeze({
+    limit: 10,
+    windowSeconds: 3_600,
+    blockSeconds: 3_600,
+  }),
+  "bank-account-mutation": Object.freeze({
+    limit: 30,
     windowSeconds: 3_600,
     blockSeconds: 3_600,
   }),

@@ -68,6 +68,7 @@ const TARGET_ID = "52000000-0000-4000-8000-000000000001"
 const OPERATION_ID = "53000000-0000-4000-8000-000000000001"
 const CORRELATION_ID = "54000000-0000-4000-8000-000000000001"
 const PASSWORD = "Senha provisória forte 42!"
+const REQUEST_REASON_CODE = "ADMIN_RESET_USER_REQUEST" as const
 const EXPIRES_AT = "2030-01-02T03:04:05.000Z"
 const actor = {
   kind: "company" as const,
@@ -120,6 +121,7 @@ describe("Task 12 administrative temporary password", () => {
       actor,
       targetUserId: TARGET_ID,
       password: PASSWORD,
+      reasonCode: REQUEST_REASON_CODE,
       correlationId: CORRELATION_ID,
     })
 
@@ -134,6 +136,7 @@ describe("Task 12 administrative temporary password", () => {
       actorUserId: ACTOR_ID,
       sessionId: SESSION_ID,
       targetUserId: TARGET_ID,
+      requestReasonCode: REQUEST_REASON_CODE,
       correlationId: CORRELATION_ID,
     })
     expect(mocks.updateUserById).toHaveBeenCalledWith(TARGET_ID, {
@@ -164,6 +167,7 @@ describe("Task 12 administrative temporary password", () => {
         actor,
         targetUserId: TARGET_ID,
         password: PASSWORD,
+        reasonCode: REQUEST_REASON_CODE,
         correlationId: CORRELATION_ID,
       }),
     ).rejects.toMatchObject({ code: "REAUTHENTICATION_REQUIRED" })
@@ -183,6 +187,7 @@ describe("Task 12 administrative temporary password", () => {
         actor,
         targetUserId: TARGET_ID,
         password: PASSWORD,
+        reasonCode: REQUEST_REASON_CODE,
         correlationId: CORRELATION_ID,
       }),
     ).rejects.toMatchObject({ code: apiCode, status })
@@ -216,6 +221,7 @@ describe("Task 12 administrative temporary password", () => {
           actor,
           targetUserId: TARGET_ID,
           password: PASSWORD,
+          reasonCode: REQUEST_REASON_CODE,
           correlationId: CORRELATION_ID,
         },
         dependencies,
@@ -249,6 +255,7 @@ describe("Task 12 administrative temporary password", () => {
         actor,
         targetUserId: TARGET_ID,
         password: PASSWORD,
+        reasonCode: REQUEST_REASON_CODE,
         correlationId: CORRELATION_ID,
       }),
     ).rejects.toMatchObject({

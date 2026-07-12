@@ -12,7 +12,7 @@ export type Database = {
       audit_events: {
         Row: {
           action: string
-          actor_user_id: string
+          actor_user_id: string | null
           company_id: string | null
           correlation_id: string
           id: string
@@ -28,7 +28,7 @@ export type Database = {
         }
         Insert: {
           action: string
-          actor_user_id: string
+          actor_user_id?: string | null
           company_id?: string | null
           correlation_id: string
           id?: string
@@ -44,7 +44,7 @@ export type Database = {
         }
         Update: {
           action?: string
-          actor_user_id?: string
+          actor_user_id?: string | null
           company_id?: string | null
           correlation_id?: string
           id?: string
@@ -1109,6 +1109,41 @@ export type Database = {
       }
     }
     Functions: {
+      company_commit_member_provisioning: {
+        Args: {
+          p_auth_user_id: string
+          p_correlation_id: string
+          p_display_name: string
+          p_email: string
+          p_modules: Database["public"]["Enums"]["module_key"][]
+          p_operation_id: string
+          p_role: Database["public"]["Enums"]["membership_role"]
+        }
+        Returns: Json
+      }
+      company_get_api_access_context: { Args: never; Returns: Json }
+      company_reserve_member_provisioning: {
+        Args: {
+          p_correlation_id: string
+          p_idempotency_key: string
+          p_request_hash: string
+          p_subject_email_hash: string
+        }
+        Returns: Json
+      }
+      company_update_membership: {
+        Args: {
+          p_correlation_id: string
+          p_display_name: string
+          p_expected_version: number
+          p_membership_id: string
+          p_modules: Database["public"]["Enums"]["module_key"][]
+          p_reason: string
+          p_role: Database["public"]["Enums"]["membership_role"]
+          p_status: Database["public"]["Enums"]["membership_status"]
+        }
+        Returns: Json
+      }
       issue_password_recovery_grant: {
         Args: { p_grant_hash: string }
         Returns: string

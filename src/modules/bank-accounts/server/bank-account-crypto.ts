@@ -29,29 +29,35 @@ const BANK_CRYPTO_FAILURE = "Bank encryption key unavailable"
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
 
-function runtimeKeyring(): BankKeyring {
-  return {
-    currentVersion: 1,
-    keys: new Map([[1, readEncryptionKey(BANK_KEY_ENV)]]),
-  }
-}
-
 function keyFor(keyring: BankKeyring, version: number): Buffer {
   const key = keyring.keys.get(version)
   if (key === undefined) throw new Error(BANK_CRYPTO_FAILURE)
   return key
 }
 
-function normalizeDigits(
+function normalizeDigitsBuffer(
   value: string,
   label: string,
   minimum: number,
   maximum: number,
-): string {
+): Buffer {
   if (!/^[0-9.\-/\s]+$/u.test(value)) throw new Error(`Invalid ${label}`)
-  const normalized = value.replace(/\D/gu, "")
-  if (normalized.length < minimum || normalized.length > maximum) {
+  let digitCount = 0
+  for (const character of value) {
+    const code = character.charCodeAt(0)
+    if (code >= 48 && code <= 57) digitCount += 1
+  }
+  if (digitCount < minimum || digitCount > maximum) {
     throw new Error(`Invalid ${label}`)
+  }
+  const normalized = Buffer.allocUnsafe(digitCount)
+  let offset = 0
+  for (const character of value) {
+    const code = character.charCodeAt(0)
+    if (code >= 48 && code <= 57) {
+      normalized[offset] = code
+      offset += 1
+    }
   }
   return normalized
 }
@@ -64,8 +70,8 @@ function aad(
   return `bank:${companyId}:${bankAccountId}:${field}`
 }
 
-function last4(value: string): string {
-  return value.slice(-4)
+function last4(value: Buffer): string {
+  return value.subarray(Math.max(0, value.length - 4)).toString("utf8")
 }
 
 export function encryptBankAccount(
@@ -76,47 +82,72 @@ export function encryptBankAccount(
     account: string
     holderDocument: string | null
   }>,
-  keyring: BankKeyring = runtimeKeyring(),
+  keyring?: BankKeyring,
 ): EncryptedBankAccount {
   if (!UUID.test(input.companyId) || !UUID.test(input.bankAccountId)) {
     throw new Error("Invalid bank encryption scope")
   }
-  const branch = normalizeDigits(input.branch, "branch", 1, 16)
-  const account = normalizeDigits(input.account, "account", 1, 32)
-  const holderDocument =
-    input.holderDocument === null
-      ? null
-      : normalizeDigits(input.holderDocument, "holder document", 11, 14)
-  const version = keyring.currentVersion
-  const key = keyFor(keyring, version)
-  return {
-    companyId: input.companyId,
-    bankAccountId: input.bankAccountId,
-    branch: encryptValue(
-      branch,
-      key,
-      version,
-      aad(input.companyId, input.bankAccountId, "branch"),
-    ),
-    branchLast4: last4(branch),
-    account: encryptValue(
-      account,
-      key,
-      version,
-      aad(input.companyId, input.bankAccountId, "account"),
-    ),
-    accountLast4: last4(account),
-    holderDocument:
-      holderDocument === null
+  // Request strings are immutable in JavaScript. Normalize into buffers we own
+  // so those transient plaintext copies can be reliably wiped in `finally`.
+  let branch: Buffer | undefined
+  let account: Buffer | undefined
+  let holderDocument: Buffer | null | undefined
+  let runtimeKey: Buffer | null = null
+  try {
+    branch = normalizeDigitsBuffer(input.branch, "branch", 1, 16)
+    account = normalizeDigitsBuffer(input.account, "account", 1, 32)
+    holderDocument =
+      input.holderDocument === null
         ? null
-        : encryptValue(
-            holderDocument,
-            key,
-            version,
-            aad(input.companyId, input.bankAccountId, "holderDocument"),
-          ),
-    holderDocumentLast4:
-      holderDocument === null ? null : last4(holderDocument),
+        : normalizeDigitsBuffer(
+            input.holderDocument,
+            "holder document",
+            11,
+            14,
+          )
+    runtimeKey = keyring === undefined ? readEncryptionKey(BANK_KEY_ENV) : null
+    const activeKeyring =
+      keyring ??
+      ({
+        currentVersion: 1,
+        keys: new Map([[1, runtimeKey!]]),
+      } satisfies BankKeyring)
+    const version = activeKeyring.currentVersion
+    const key = keyFor(activeKeyring, version)
+    return {
+      companyId: input.companyId,
+      bankAccountId: input.bankAccountId,
+      branch: encryptValue(
+        branch,
+        key,
+        version,
+        aad(input.companyId, input.bankAccountId, "branch"),
+      ),
+      branchLast4: last4(branch),
+      account: encryptValue(
+        account,
+        key,
+        version,
+        aad(input.companyId, input.bankAccountId, "account"),
+      ),
+      accountLast4: last4(account),
+      holderDocument:
+        holderDocument === null
+          ? null
+          : encryptValue(
+              holderDocument,
+              key,
+              version,
+              aad(input.companyId, input.bankAccountId, "holderDocument"),
+            ),
+      holderDocumentLast4:
+        holderDocument === null ? null : last4(holderDocument),
+    }
+  } finally {
+    branch?.fill(0)
+    account?.fill(0)
+    holderDocument?.fill(0)
+    runtimeKey?.fill(0)
   }
 }
 

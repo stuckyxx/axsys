@@ -1,16 +1,49 @@
 import "server-only"
 
+import { bffDb, type ManagedCompanyUserSnapshot } from "@/lib/db/bff"
 import { ApiError } from "@/lib/http/api-error"
 import { fingerprintSensitiveExact } from "@/lib/security/redact"
+import { createServerSupabase } from "@/lib/supabase/server"
+import { z } from "@/lib/validation/zod"
 import type { AccessContext } from "@/modules/auth/domain/access-context"
 import { validatePassword } from "@/modules/auth/server/password-policy"
 import {
   createCompanyUserSchema,
   type CreateCompanyUserInput,
 } from "@/modules/users/schemas/user-schemas"
+import { getAuthAdminGateway } from "@/modules/users/server/auth-admin-gateway"
 
 type ModuleKey = "administrative" | "financial" | "certificates"
 type CompanyRole = "company_admin" | "member"
+
+const provisioningOperationSchema = z
+  .object({
+    id: z.uuid(),
+    status: z.enum(["reserved", "auth_created", "committed"]),
+    authUserId: z.uuid().nullable(),
+  })
+  .strict()
+
+const managedCompanyUserSchema = z
+  .object({
+    membershipId: z.uuid(),
+    targetUserId: z.uuid(),
+    displayName: z.string().min(2).max(120),
+    email: z.email().max(254),
+    role: z.enum(["company_admin", "member"]),
+    status: z.enum(["active", "suspended"]),
+    modules: z.array(z.enum(["administrative", "financial", "certificates"])),
+    version: z.int().positive(),
+    mustChangePassword: z.boolean(),
+    temporaryPasswordExpiresAt: z.iso.datetime({ offset: true }).nullable(),
+    accessState: z.enum([
+      "active",
+      "suspended",
+      "password_change_required",
+      "archived_company",
+    ]),
+  })
+  .strict()
 
 export type CompanyUserDto = Readonly<{
   id: string
@@ -90,6 +123,9 @@ export type UserProvisioningDependencies = Readonly<{
       operationId: string
       subjectEmailHash: string
       fingerprintEmail(email: string): string
+      actorUserId: string
+      sessionId: string
+      expectedEmail: string
     }): Promise<{ id: string } | null>
     deleteUser(userId: string): Promise<void>
     banUser(userId: string): Promise<void>
@@ -115,6 +151,30 @@ function errorCode(error: unknown): string | null {
     return null
   }
   return typeof error.code === "string" ? error.code : null
+}
+
+function errorToken(error: unknown): string | null {
+  if (typeof error !== "object" || error === null || !("message" in error)) {
+    return errorCode(error)
+  }
+  return typeof error.message === "string" ? error.message : errorCode(error)
+}
+
+function mapReservationError(error: unknown): never {
+  const token = errorToken(error)
+  if (token === "AXSYS_IDEMPOTENCY_KEY_REUSED") {
+    throw publicError("IDEMPOTENCY_KEY_REUSED", 409)
+  }
+  if (token === "AXSYS_COMPANY_ARCHIVED") {
+    throw publicError("COMPANY_ARCHIVED", 403)
+  }
+  if (
+    token === "AXSYS_COMPANY_ADMIN_REQUIRED" ||
+    token === "AXSYS_SESSION_INVALID"
+  ) {
+    throw publicError("USER_PROVISIONING_FORBIDDEN", 403)
+  }
+  throw error
 }
 
 function isAuthIdentityConflict(error: unknown): boolean {
@@ -185,6 +245,7 @@ async function compensateAuthIdentity(
   scope: ProvisioningScope,
   operationId: string,
   authUserId: string,
+  terminalError: ApiError = publicError("USER_CREATE_FAILED"),
 ): Promise<never> {
   try {
     await dependencies.authAdmin.deleteUser(authUserId)
@@ -216,7 +277,7 @@ async function compensateAuthIdentity(
   } catch {
     throw publicError("USER_CREATE_RECONCILIATION_REQUIRED")
   }
-  throw publicError("USER_CREATE_FAILED")
+  throw terminalError
 }
 
 export async function provisionCompanyUser(
@@ -247,7 +308,12 @@ export async function provisionCompanyUser(
     modules: input.modules,
   }
 
-  let operation = await dependencies.reserveProvisioning(reservation)
+  let operation: ProvisioningOperation
+  try {
+    operation = await dependencies.reserveProvisioning(reservation)
+  } catch (error) {
+    return mapReservationError(error)
+  }
   let authUserId: string
   if (operation.status === "auth_created" || operation.status === "committed") {
     authUserId = operation.authUserId
@@ -273,6 +339,9 @@ export async function provisionCompanyUser(
           subjectEmailHash,
           fingerprintEmail: (email) =>
             fingerprint("company-user-email", email),
+          actorUserId: scope.actorUserId,
+          sessionId: scope.sessionId,
+          expectedEmail: input.email,
         })
       }
       if (created === null) throw publicError("USER_CONFLICT", 409)
@@ -319,6 +388,9 @@ export async function provisionCompanyUser(
         scope,
         operation.operationId,
         authUserId,
+        errorCode(error) === "23505"
+          ? publicError("USER_CONFLICT", 409)
+          : publicError("USER_CREATE_FAILED"),
       )
     }
     try {
@@ -337,4 +409,138 @@ export async function provisionCompanyUser(
     }
     throw publicError("USER_CREATE_RETRY_REQUIRED")
   }
+}
+
+function mapManagedUser(
+  companyId: string,
+  user: ManagedCompanyUserSnapshot,
+): CompanyUserDto {
+  if (
+    user.status !== "active" ||
+    !user.mustChangePassword ||
+    user.temporaryPasswordExpiresAt === null
+  ) {
+    throw publicError("USER_CREATE_FAILED")
+  }
+  return {
+    id: user.membershipId,
+    userId: user.targetUserId,
+    companyId,
+    displayName: user.displayName,
+    role: user.role,
+    modules: [...user.modules],
+    status: "active",
+    version: user.version,
+    mustChangePassword: true,
+    temporaryPasswordExpiresAt: user.temporaryPasswordExpiresAt,
+  }
+}
+
+function mapOperation(operation: {
+  id: string
+  status: string
+  authUserId: string | null
+}): ProvisioningOperation {
+  if (operation.status === "reserved" && operation.authUserId === null) {
+    return { operationId: operation.id, status: "reserved" }
+  }
+  if (
+    (operation.status === "auth_created" || operation.status === "committed") &&
+    operation.authUserId !== null
+  ) {
+    return {
+      operationId: operation.id,
+      status: operation.status,
+      authUserId: operation.authUserId,
+    }
+  }
+  throw publicError("USER_CREATE_FAILED")
+}
+
+export function getUserProvisioningDependencies(): UserProvisioningDependencies {
+  const gateway = getAuthAdminGateway()
+  const authAdmin: UserProvisioningDependencies["authAdmin"] = {
+    ...gateway,
+    async findProvisionedUser(input) {
+      const id = await bffDb.findProvisioningAuthUser({
+        actorUserId: input.actorUserId,
+        sessionId: input.sessionId,
+        operationId: input.operationId,
+        expectedEmail: input.expectedEmail,
+      })
+      return id === null ? null : { id }
+    },
+  }
+  return {
+    async reserveProvisioning(input) {
+      if (input.platformAdminOnly) {
+        const operation = await bffDb.reserveCompanyAdminProvisioning(input)
+        return mapOperation(operation)
+      }
+      const client = await createServerSupabase()
+      const result = await client.rpc("company_reserve_member_provisioning", {
+        p_idempotency_key: input.idempotencyKeyHash,
+        p_request_hash: input.requestHash,
+        p_subject_email_hash: input.subjectEmailHash,
+        p_correlation_id: input.correlationId,
+      })
+      if (result.error !== null) throw result.error
+      const operation = provisioningOperationSchema.parse(result.data)
+      return mapOperation(operation)
+    },
+    markAuthCreated: (input) =>
+      bffDb.markProvisioningAuthCreated({
+        operationId: input.operationId,
+        actorUserId: input.actorUserId,
+        sessionId: input.sessionId,
+        authUserId: input.authUserId,
+      }),
+    async commitProvisioning(input) {
+      if (input.platformAdminOnly) {
+        return mapManagedUser(
+          input.companyId,
+          await bffDb.commitCompanyAdminProvisioning({
+            actorUserId: input.actorUserId,
+            sessionId: input.sessionId,
+            operationId: input.operationId,
+            authUserId: input.authUserId,
+            companyId: input.companyId,
+            displayName: input.displayName,
+            email: input.email,
+            modules: [...input.modules],
+            correlationId: input.correlationId,
+          }),
+        )
+      }
+      const client = await createServerSupabase()
+      const result = await client.rpc("company_commit_member_provisioning", {
+        p_operation_id: input.operationId,
+        p_auth_user_id: input.authUserId,
+        p_display_name: input.displayName,
+        p_email: input.email,
+        p_role: input.role,
+        p_modules: [...input.modules],
+        p_correlation_id: input.correlationId,
+      })
+      if (result.error !== null) throw result.error
+      return mapManagedUser(
+        input.companyId,
+        managedCompanyUserSchema.parse(result.data),
+      )
+    },
+    markCompensation: (input) =>
+      bffDb.markProvisioningCompensation({
+        operationId: input.operationId,
+        actorUserId: input.actorUserId,
+        sessionId: input.sessionId,
+        status: input.status,
+        errorCode: input.errorCode,
+      }),
+    authAdmin,
+    fingerprint: fingerprintSensitiveExact,
+  }
+}
+
+export function provisionCompanyUserWithDefaults(command: ProvisionCompanyUserCommand) {
+  return provisionCompanyUser(getUserProvisioningDependencies(), command)
 }

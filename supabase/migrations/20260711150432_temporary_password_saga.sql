@@ -231,6 +231,7 @@ create function private.begin_temporary_password_reset(
   p_actor_user_id uuid,
   p_session_id uuid,
   p_target_user_id uuid,
+  p_request_reason_code text,
   p_correlation_id uuid
 ) returns table (
   operation_id uuid,
@@ -257,6 +258,17 @@ begin
     raise exception using
       errcode = '22023',
       message = 'auth_password_reset_input_invalid';
+  end if;
+  if p_request_reason_code is null
+     or p_request_reason_code not in (
+       'ADMIN_RESET_USER_REQUEST',
+       'ADMIN_RESET_ACCESS_RECOVERY',
+       'ADMIN_RESET_SECURITY_INCIDENT',
+       'ADMIN_RESET_ADMINISTRATIVE_CORRECTION'
+     ) then
+    raise exception using
+      errcode = '22023',
+      message = 'auth_password_reset_reason_invalid';
   end if;
   if p_actor_user_id = p_target_user_id then
     raise exception using
@@ -427,7 +439,7 @@ begin
   ) values (
     v_scope, v_company_id, p_actor_user_id,
     'auth.temporary_password_reset_reserved', 'user', p_target_user_id,
-    'success', null, p_correlation_id, '{}', v_now
+    'success', p_request_reason_code, p_correlation_id, '{}', v_now
   );
 
   return query select v_operation_id, v_expires_at;
@@ -893,10 +905,10 @@ end;
 $$;
 
 revoke execute on function private.begin_temporary_password_reset(
-  uuid,uuid,uuid,uuid
+  uuid,uuid,uuid,text,uuid
 ) from public, anon, authenticated, service_role, axsys_bff;
 grant execute on function private.begin_temporary_password_reset(
-  uuid,uuid,uuid,uuid
+  uuid,uuid,uuid,text,uuid
 ) to axsys_bff;
 revoke execute on function private.complete_temporary_password_reset(
   uuid,uuid,uuid,uuid

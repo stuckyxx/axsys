@@ -33,13 +33,23 @@ export const updateBankAccountSchema = z
   })
   .strict()
 
+export const bankAccountArchiveReasonCodeSchema = z.enum([
+  "BANK_ARCHIVE_ACCOUNT_CLOSED",
+  "BANK_ARCHIVE_BANK_CHANGED",
+  "BANK_ARCHIVE_DATA_CORRECTION",
+  "BANK_ARCHIVE_SECURITY_RESPONSE",
+])
+
 export const archiveBankAccountSchema = z
   .object({
     version: z.int().positive(),
     replacementDefaultId: z.uuid().nullable(),
-    reason: z.string().trim().min(10).max(500),
+    reasonCode: bankAccountArchiveReasonCodeSchema,
   })
   .strict()
 
 export type CreateBankAccountInput = z.infer<typeof createBankAccountSchema>
 export type UpdateBankAccountInput = z.infer<typeof updateBankAccountSchema>
+export type BankAccountArchiveReasonCode = z.infer<
+  typeof bankAccountArchiveReasonCodeSchema
+>

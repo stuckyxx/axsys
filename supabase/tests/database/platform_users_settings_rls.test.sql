@@ -808,7 +808,7 @@ select results_eq(
     ('guard_membership_identity','','trigger','postgres',false,true),
     ('list_company_user_directory',
       'p_actor_user_id uuid, p_session_id uuid, p_cursor uuid, p_limit integer, p_query text',
-      'TABLE(user_id uuid, display_name text, email text, role text, status text, modules text[], created_at timestamp with time zone)',
+      'TABLE(user_id uuid, membership_id uuid, display_name text, email text, role text, status text, modules text[], version bigint, created_at timestamp with time zone)',
       'postgres',true,true),
     ('protect_last_company_admin','','trigger','postgres',false,true),
     ('reserve_image_upload_intent',
@@ -1136,7 +1136,7 @@ select results_eq(
 select ok(
   (
     with page_one as materialized (
-      select user_id
+      select user_id, membership_id
       from private.list_company_user_directory(
         '20000000-0000-4000-8000-000000000001',
         '90000000-0000-4000-8000-000000000101',
@@ -1150,7 +1150,7 @@ select ok(
       from private.list_company_user_directory(
         '20000000-0000-4000-8000-000000000001',
         '90000000-0000-4000-8000-000000000101',
-        (select user_id from page_one),
+        (select membership_id from page_one),
         1,
         null
       )
@@ -1163,7 +1163,20 @@ select ok(
          join page_two using (user_id)
        )
   ),
-  'directory paginates from the returned user id without overlap'
+  'directory paginates from the returned membership id without overlap'
+);
+select throws_ok(
+  $$select *
+    from private.list_company_user_directory(
+      '20000000-0000-4000-8000-000000000001',
+      '90000000-0000-4000-8000-000000000101',
+      '20000000-0000-4000-8000-000000000001',
+      1,
+      null
+    )$$,
+  '22023',
+  'company_directory_cursor_invalid',
+  'directory never confuses a user id with the opaque membership cursor'
 );
 select results_eq(
   $$select user_id

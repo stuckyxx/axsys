@@ -101,7 +101,7 @@ describe("company user schemas", () => {
     ).toBe(false)
   })
 
-  it("requires a reason for suspension and administrative password reset", () => {
+  it("requires a reason for suspension and a categorized password reset reason", () => {
     expect(() =>
       updateCompanyUserSchema.parse({
         displayName: "Maria",
@@ -115,7 +115,19 @@ describe("company user schemas", () => {
     expect(() =>
       temporaryPasswordResetSchema.parse({
         temporaryPassword: "frase provisoria segura 2026",
-        reason: "curto",
+        reasonCode: "FREE_FORM_REASON",
+      }),
+    ).toThrow()
+    expect(
+      temporaryPasswordResetSchema.parse({
+        temporaryPassword: "frase provisoria segura 2026",
+        reasonCode: "ADMIN_RESET_USER_REQUEST",
+      }),
+    ).toMatchObject({ reasonCode: "ADMIN_RESET_USER_REQUEST" })
+    expect(() =>
+      temporaryPasswordResetSchema.parse({
+        temporaryPassword: "frase provisoria segura 2026",
+        reason: "Solicitação administrativa em texto livre.",
       }),
     ).toThrow()
   })
