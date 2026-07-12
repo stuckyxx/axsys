@@ -9,10 +9,10 @@ const moduleSchema = z.enum(MODULE_ORDER)
 
 const modulesSchema = z
   .array(moduleSchema)
-  .max(3)
   .transform((modules) =>
     MODULE_ORDER.filter((module) => modules.includes(module)),
   )
+  .pipe(z.array(moduleSchema).max(3))
 
 const displayNameSchema = z.string().trim().min(2).max(120)
 const normalizedEmailSchema = z.string().trim().toLowerCase().email().max(254)
