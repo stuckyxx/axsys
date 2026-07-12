@@ -41,6 +41,24 @@ export async function requirePlatformContext() {
   return context
 }
 
+export async function requirePlatformApiContext() {
+  const resolution = await getAccessContext()
+  if (resolution.status === "anonymous") {
+    throw new ApiError("AUTH_REQUIRED", 401, "Faça login para continuar.")
+  }
+  if (resolution.status === "password_change") {
+    throw new ApiError(
+      "PASSWORD_CHANGE_REQUIRED",
+      403,
+      "Altere sua senha provisória para continuar.",
+    )
+  }
+  if (resolution.context.kind !== "platform") {
+    throw new ApiError("PLATFORM_FORBIDDEN", 403, "Operação não autorizada.")
+  }
+  return resolution.context
+}
+
 export async function requireCompanyContext(requiredModule?: ModuleKey) {
   const context = await requireAccessContext()
   if (context.kind === "platform") {

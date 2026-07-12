@@ -481,6 +481,7 @@ describe("rate-limit policy boundary", () => {
       | "forgot-account-volume"
       | "file-mutation-user"
       | "file-download-user"
+      | "platform-company-create"
     >()
     expectTypeOf<Parameters<typeof consumeRateLimit>>().toEqualTypeOf<
       [bucket: RateLimitBucket, rawKey: string]
