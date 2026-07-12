@@ -683,9 +683,11 @@ select results_eq(
       and has_function_privilege('axsys_bff', function.oid, 'EXECUTE')
     order by function.oid::regprocedure::text$$,
   $$values
+    ('private.activate_file_upload_authorization(uuid,uuid,uuid)'),
     ('private.assert_auth_session(uuid,uuid)'),
     ('private.begin_password_recovery(text,uuid)'),
     ('private.begin_temporary_password_reset(uuid,uuid,uuid,uuid)'),
+    ('private.cancel_unissued_file_reservation(uuid,uuid,uuid)'),
     ('private.clear_rate_limit(text,text)'),
     ('private.complete_password_recovery(uuid,uuid)'),
     ('private.complete_temporary_password_change(uuid,uuid,uuid)'),
@@ -694,12 +696,14 @@ select results_eq(
     ('private.fail_closed_login_session(uuid,uuid,text,uuid)'),
     ('private.fail_password_recovery(uuid,text,uuid)'),
     ('private.fail_temporary_password_reset(uuid,uuid,uuid,text,uuid)'),
+    ('private.list_company_user_directory(uuid,uuid,uuid,integer,text)'),
     ('private.register_auth_session(uuid,uuid,boolean)'),
+    ('private.reserve_image_upload_intent(uuid,uuid,text,text,text,bigint)'),
     ('private.revoke_sessions_and_write_logout(uuid,uuid,uuid,text,text)'),
     ('private.rotate_app_session_after_reauthentication(uuid,uuid,uuid,uuid)'),
     ('private.write_authenticated_audit_event(uuid,uuid,text,text,uuid,audit_outcome,text,uuid,text,text,jsonb)'),
     ('private.write_security_event(text,uuid,text,text,audit_outcome,text,uuid,jsonb)')$$,
-  'axsys_bff recebe exatamente dezesseis EXECUTEs efetivos'
+  'axsys_bff recebe exatamente vinte EXECUTEs efetivos'
 );
 select results_eq(
   $$select role_name::text collate "default",

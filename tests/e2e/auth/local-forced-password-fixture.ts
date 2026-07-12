@@ -229,10 +229,43 @@ class ForcedPasswordIdentityFixture {
             delete from public.member_modules
             where membership_id = ${this.membershipId}::uuid
           `
+          await transaction.unsafe(
+            "lock table public.company_memberships in access exclusive mode",
+          )
+          const [membershipTrigger] = await transaction<[{ enabled: string }]>`
+            select tgenabled as enabled
+            from pg_trigger
+            where tgrelid = 'public.company_memberships'::regclass
+              and tgname = 'protect_last_company_admin'
+              and not tgisinternal
+          `
+          if (membershipTrigger?.enabled !== "O") {
+            throw new Error(
+              "Membership protection trigger must be enabled before cleanup",
+            )
+          }
+          await transaction.unsafe(
+            "alter table public.company_memberships disable trigger protect_last_company_admin",
+          )
           await transaction`
             delete from public.company_memberships
             where id = ${this.membershipId}::uuid
           `
+          await transaction.unsafe(
+            "alter table public.company_memberships enable trigger protect_last_company_admin",
+          )
+          const [restoredMembershipTrigger] = await transaction<
+            [{ enabled: string }]
+          >`
+            select tgenabled as enabled
+            from pg_trigger
+            where tgrelid = 'public.company_memberships'::regclass
+              and tgname = 'protect_last_company_admin'
+              and not tgisinternal
+          `
+          if (restoredMembershipTrigger?.enabled !== "O") {
+            throw new Error("Membership protection trigger was not restored")
+          }
           await transaction`
             delete from private.company_storage_usage
             where company_id = ${this.companyId}::uuid

@@ -97,6 +97,32 @@ export type RateLimitDecision = {
   retryAfterSeconds: number
 }
 
+type ImageUploadPurpose =
+  | "profile_avatar"
+  | "company_letterhead"
+  | "company_signature"
+
+type UploadReservation = {
+  intentId: string
+  quarantinePath: string
+  declaredSize: number
+}
+
+type UploadAuthorization = {
+  uploadAuthorizationExpiresAt: string
+  finalizeBefore: string
+}
+
+type CompanyUserDirectoryEntry = {
+  userId: string
+  displayName: string
+  email: string
+  role: "company_admin" | "member"
+  status: "active" | "suspended"
+  modules: ("administrative" | "financial" | "certificates")[]
+  createdAt: string
+}
+
 export const bffDb = {
   async consumeRateLimit(input: {
     bucket: string
@@ -388,5 +414,91 @@ export const bffDb = {
         ${input.correlationId}::uuid
       )
     `
+  },
+
+  async reserveImageUploadIntent(input: {
+    actorUserId: string
+    sessionId: string
+    purpose: ImageUploadPurpose
+    declaredName: string
+    declaredMime: string
+    declaredSize: number
+  }): Promise<UploadReservation> {
+    const sql = await getSql()
+    const [row] = await sql<[{ reservation: UploadReservation }]>`
+      select private.reserve_image_upload_intent(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.purpose},
+        ${input.declaredName},
+        ${input.declaredMime},
+        ${input.declaredSize}::bigint
+      ) as reservation
+    `
+    return row.reservation
+  },
+
+  async activateFileUploadAuthorization(input: {
+    actorUserId: string
+    sessionId: string
+    intentId: string
+  }): Promise<UploadAuthorization> {
+    const sql = await getSql()
+    const [row] = await sql<[{ authorization: UploadAuthorization }]>`
+      select private.activate_file_upload_authorization(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.intentId}::uuid
+      ) as authorization
+    `
+    return row.authorization
+  },
+
+  async cancelUnissuedFileReservation(input: {
+    actorUserId: string
+    sessionId: string
+    intentId: string
+  }): Promise<void> {
+    const sql = await getSql()
+    await sql`
+      select private.cancel_unissued_file_reservation(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.intentId}::uuid
+      )
+    `
+  },
+
+  async listCompanyUserDirectory(input: {
+    actorUserId: string
+    sessionId: string
+    cursor: string | null
+    limit: number
+    searchQuery: string | null
+  }): Promise<CompanyUserDirectoryEntry[]> {
+    const sql = await getSql()
+    const rows = await sql<
+      (Omit<CompanyUserDirectoryEntry, "createdAt"> & { createdAt: Date })[]
+    >`
+      select user_id as "userId",
+             display_name as "displayName",
+             email,
+             role,
+             status,
+             modules,
+             created_at as "createdAt"
+      from private.list_company_user_directory(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.cursor}::uuid,
+        ${input.limit},
+        ${input.searchQuery}
+      )
+    `
+    return rows.map((row) => ({
+      ...row,
+      modules: [...row.modules],
+      createdAt: row.createdAt.toISOString(),
+    }))
   },
 }

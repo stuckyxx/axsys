@@ -255,6 +255,18 @@ function expectConflict(outcome: Outcome, message: string): void {
   }
 }
 
+function expectImmutableMembershipIdentity(outcome: Outcome): void {
+  expect(outcome.ok).toBe(false)
+  if (!outcome.ok) {
+    expect(outcome.error).toMatchObject({ code: "P0001" })
+    expect((outcome.error as Error).message).toBe(
+      "AXSYS_MEMBERSHIP_IDENTITY_IMMUTABLE",
+    )
+    expect((outcome.error as { code?: string }).code).not.toBe("40P01")
+    expect((outcome.error as { code?: string }).code).not.toBe("55P03")
+  }
+}
+
 async function releaseSessionGate(
   sql: Sql,
   resourceId: string,
@@ -710,7 +722,7 @@ describe.sequential("identity invariants under concurrent writes", () => {
       expect(platformCrossOutcome).toBeDefined()
       expect(membershipCrossOutcome).toBeDefined()
       expectConflict(platformCrossOutcome!, "identity_scope_conflict")
-      expectConflict(membershipCrossOutcome!, "identity_scope_conflict")
+      expectImmutableMembershipIdentity(membershipCrossOutcome!)
 
       const [unchanged] = await workerA<
         [{ platformUser: string; membershipUser: string; identityRows: number }]

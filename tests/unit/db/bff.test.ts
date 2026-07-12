@@ -12,11 +12,13 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe("bffDb boundary", () => {
-  it("exports only the sixteen typed security-control and password operations", () => {
+  it("exports only the twenty typed security-control, password, upload and directory operations", () => {
     expect(Object.keys(bffDb).sort()).toEqual([
+      "activateFileUploadAuthorization",
       "assertAuthSession",
       "beginPasswordRecovery",
       "beginTemporaryPasswordReset",
+      "cancelUnissuedFileReservation",
       "clearRateLimit",
       "completePasswordRecovery",
       "completeTemporaryPasswordChange",
@@ -25,7 +27,9 @@ describe("bffDb boundary", () => {
       "failClosedLoginSession",
       "failPasswordRecovery",
       "failTemporaryPasswordReset",
+      "listCompanyUserDirectory",
       "registerAuthSession",
+      "reserveImageUploadIntent",
       "revokeSessionsAndWriteLogout",
       "rotateAppSessionAfterReauthentication",
       "writeAuthenticatedAuditEvent",
@@ -234,6 +238,73 @@ describe("bffDb boundary", () => {
       ]
     >()
     expectTypeOf(bffDb.failPasswordRecovery).returns.toEqualTypeOf<Promise<void>>()
+    expectTypeOf<Parameters<typeof bffDb.reserveImageUploadIntent>>().toEqualTypeOf<
+      [
+        input: {
+          actorUserId: string
+          sessionId: string
+          purpose:
+            | "profile_avatar"
+            | "company_letterhead"
+            | "company_signature"
+          declaredName: string
+          declaredMime: string
+          declaredSize: number
+        },
+      ]
+    >()
+    expectTypeOf(bffDb.reserveImageUploadIntent).returns.toEqualTypeOf<
+      Promise<{
+        intentId: string
+        quarantinePath: string
+        declaredSize: number
+      }>
+    >()
+    expectTypeOf<
+      Parameters<typeof bffDb.activateFileUploadAuthorization>
+    >().toEqualTypeOf<
+      [input: { actorUserId: string; sessionId: string; intentId: string }]
+    >()
+    expectTypeOf(bffDb.activateFileUploadAuthorization).returns.toEqualTypeOf<
+      Promise<{
+        uploadAuthorizationExpiresAt: string
+        finalizeBefore: string
+      }>
+    >()
+    expectTypeOf<
+      Parameters<typeof bffDb.cancelUnissuedFileReservation>
+    >().toEqualTypeOf<
+      [input: { actorUserId: string; sessionId: string; intentId: string }]
+    >()
+    expectTypeOf(bffDb.cancelUnissuedFileReservation).returns.toEqualTypeOf<
+      Promise<void>
+    >()
+    expectTypeOf<
+      Parameters<typeof bffDb.listCompanyUserDirectory>
+    >().toEqualTypeOf<
+      [
+        input: {
+          actorUserId: string
+          sessionId: string
+          cursor: string | null
+          limit: number
+          searchQuery: string | null
+        },
+      ]
+    >()
+    expectTypeOf(bffDb.listCompanyUserDirectory).returns.toEqualTypeOf<
+      Promise<
+        {
+          userId: string
+          displayName: string
+          email: string
+          role: "company_admin" | "member"
+          status: "active" | "suspended"
+          modules: ("administrative" | "financial" | "certificates")[]
+          createdAt: string
+        }[]
+      >
+    >()
   })
 
   it("keeps the SQL client private and uses static private function names", () => {
@@ -248,9 +319,11 @@ describe("bffDb boundary", () => {
       ([, routineName]) => routineName,
     ).sort()
     expect(staticRoutineNames).toEqual([
+      "activate_file_upload_authorization",
       "assert_auth_session",
       "begin_password_recovery",
       "begin_temporary_password_reset",
+      "cancel_unissued_file_reservation",
       "clear_rate_limit",
       "complete_password_recovery",
       "complete_temporary_password_change",
@@ -259,7 +332,9 @@ describe("bffDb boundary", () => {
       "fail_closed_login_session",
       "fail_password_recovery",
       "fail_temporary_password_reset",
+      "list_company_user_directory",
       "register_auth_session",
+      "reserve_image_upload_intent",
       "revoke_sessions_and_write_logout",
       "rotate_app_session_after_reauthentication",
       "write_authenticated_audit_event",

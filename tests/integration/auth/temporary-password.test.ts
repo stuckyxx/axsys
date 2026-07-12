@@ -647,8 +647,11 @@ describe.sequential("Task 12 real temporary-password saga", () => {
       where profile.user_id = ${fixture.memberA.userId}::uuid
     `
     expect(profile.mustChange).toBe(true)
-    expect(profile.expiresAt.getTime()).toBeGreaterThan(Date.now() + 23 * 60 * 60_000)
-    expect(profile.expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + 24 * 60 * 60_000)
+    const observedAt = Date.now()
+    expect(profile.expiresAt.getTime()).toBeGreaterThan(observedAt + 23 * 60 * 60_000)
+    expect(profile.expiresAt.getTime()).toBeLessThanOrEqual(
+      observedAt + 24 * 60 * 60_000 + 1_000,
+    )
     expect(profile.activeSessions).toBe(0)
 
     const oldJwtResponse = await fetch(

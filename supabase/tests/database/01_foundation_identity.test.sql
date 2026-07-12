@@ -190,6 +190,7 @@ select results_eq(
     ('companies','companies_serialize_auth_scope','serialize_identity_invariants','O'),
     ('companies','companies_touch_version','touch_version','O'),
     ('company_memberships','company_memberships_serialize_identity_invariants','serialize_identity_invariants','O'),
+    ('company_memberships','guard_membership_identity_before_update','guard_membership_identity','O'),
     ('company_memberships','membership_identity_exclusivity','enforce_identity_exclusivity','O'),
     ('company_memberships','memberships_touch_version','touch_version','O'),
     ('company_memberships','protect_last_company_admin','protect_last_company_admin','O'),

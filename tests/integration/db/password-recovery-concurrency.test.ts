@@ -490,10 +490,20 @@ async function deleteTenantCompany(input: {
   companyId: string
 }): Promise<void> {
   await input.sql.begin(async (transaction) => {
+    // Task 3 forbids membership DELETE in every application path. This
+    // privileged concurrency probe temporarily bypasses only that trigger so
+    // the older parent-first FK race remains covered; the trigger is restored
+    // before the transaction can commit and any later failure rolls all DDL back.
+    await transaction.unsafe(
+      "alter table public.company_memberships disable trigger protect_last_company_admin",
+    )
     await transaction`
       delete from public.company_memberships
       where id = ${input.membershipId}::uuid
     `
+    await transaction.unsafe(
+      "alter table public.company_memberships enable trigger protect_last_company_admin",
+    )
     await transaction`
       delete from private.company_storage_usage
       where company_id = ${input.companyId}::uuid
@@ -669,10 +679,36 @@ async function cleanupFixtures(sql: Sql): Promise<void> {
       delete from public.member_modules
       where membership_id = any(${ALL_MEMBERSHIPS}::uuid[])
     `
+    const [membershipTrigger] = await transaction<[{ enabled: string }]>`
+      select tgenabled as enabled
+      from pg_trigger
+      where tgrelid = 'public.company_memberships'::regclass
+        and tgname = 'protect_last_company_admin'
+        and not tgisinternal
+    `
+    if (membershipTrigger?.enabled !== "O") {
+      throw new Error("Password-recovery cleanup requires its membership trigger")
+    }
+    await transaction.unsafe(
+      "alter table public.company_memberships disable trigger protect_last_company_admin",
+    )
     await transaction`
       delete from public.company_memberships
       where id = any(${ALL_MEMBERSHIPS}::uuid[])
     `
+    await transaction.unsafe(
+      "alter table public.company_memberships enable trigger protect_last_company_admin",
+    )
+    const [restoredMembershipTrigger] = await transaction<[{ enabled: string }]>`
+      select tgenabled as enabled
+      from pg_trigger
+      where tgrelid = 'public.company_memberships'::regclass
+        and tgname = 'protect_last_company_admin'
+        and not tgisinternal
+    `
+    if (restoredMembershipTrigger?.enabled !== "O") {
+      throw new Error("Password-recovery cleanup did not restore its membership trigger")
+    }
     await transaction`
       delete from private.company_storage_usage
       where company_id = any(${ALL_COMPANIES}::uuid[])

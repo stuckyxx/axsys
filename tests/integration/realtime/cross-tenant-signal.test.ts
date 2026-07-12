@@ -138,6 +138,38 @@ async function waitForEvent(
   }
 }
 
+async function awaitAuthorizedSubscriptionReadiness(): Promise<void> {
+  async function driveUntilReady(
+    companyId: string,
+    events: readonly string[],
+  ): Promise<void> {
+    const deadline = Date.now() + 10_000
+    while (!events.includes(companyId) && Date.now() < deadline) {
+      await ownerSql`
+        update public.companies
+        set trade_name = ${`Realtime readiness ${randomUUID()}`}
+        where id = ${companyId}::uuid
+      `
+      if (!events.includes(companyId)) {
+        await new Promise((resolve) => setTimeout(resolve, 250))
+      }
+    }
+    if (!events.includes(companyId)) {
+      throw new Error(`${FIXTURE_NAME} readiness signal did not arrive`)
+    }
+  }
+
+  // Realtime can report the Phoenix channel as subscribed just before its
+  // Postgres changes binding is observable. Drive an authorized sentinel
+  // mutation until each binding proves readiness instead of sleeping blindly.
+  await driveUntilReady(fixtureB.companyId, eventsB)
+  await driveUntilReady(fixtureA.companyId, eventsA)
+
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  eventsA.length = 0
+  eventsB.length = 0
+}
+
 beforeAll(async () => {
   requestCookies.current = fixtureA.jar
   await fixtureA.createCompanyIdentity()
@@ -154,6 +186,7 @@ beforeAll(async () => {
     subscribeToCompanies(clientA, "company-a", eventsA),
     subscribeToCompanies(clientB, "company-b", eventsB),
   ])
+  await awaitAuthorizedSubscriptionReadiness()
 }, 45_000)
 
 afterAll(async () => {
@@ -196,35 +229,39 @@ afterAll(async () => {
 }, 45_000)
 
 describe.sequential("Task 16 authorized Realtime signals", () => {
-  it("does not wake company A for a mutation visible only to company B", async () => {
-    await ownerSql`
-      update public.companies
-      set trade_name = ${`Realtime B ${randomUUID()}`}
-      where id = ${fixtureB.companyId}::uuid
-    `
-    await waitForEvent(eventsB, fixtureB.companyId)
+  it(
+    "does not wake company A for a mutation visible only to company B",
+    async () => {
+      await ownerSql`
+        update public.companies
+        set trade_name = ${`Realtime B ${randomUUID()}`}
+        where id = ${fixtureB.companyId}::uuid
+      `
+      await waitForEvent(eventsB, fixtureB.companyId)
 
-    expect(eventsB).toEqual([fixtureB.companyId])
-    expect(eventsA).toEqual([])
+      expect(eventsB).toEqual([fixtureB.companyId])
+      expect(eventsA).toEqual([])
 
-    await ownerSql`
-      update public.companies
-      set trade_name = ${`Realtime A ${randomUUID()}`}
-      where id = ${fixtureA.companyId}::uuid
-    `
-    await waitForEvent(eventsA, fixtureA.companyId)
+      await ownerSql`
+        update public.companies
+        set trade_name = ${`Realtime A ${randomUUID()}`}
+        where id = ${fixtureA.companyId}::uuid
+      `
+      await waitForEvent(eventsA, fixtureA.companyId)
 
-    expect(eventsA).toEqual([fixtureA.companyId])
-    expect(eventsB).toEqual([fixtureB.companyId])
+      expect(eventsA).toEqual([fixtureA.companyId])
+      expect(eventsB).toEqual([fixtureB.companyId])
 
-    await ownerSql`
-      update public.companies
-      set trade_name = ${`Realtime B barrier ${randomUUID()}`}
-      where id = ${fixtureB.companyId}::uuid
-    `
-    await waitForEvent(eventsB, fixtureB.companyId, 2)
+      await ownerSql`
+        update public.companies
+        set trade_name = ${`Realtime B barrier ${randomUUID()}`}
+        where id = ${fixtureB.companyId}::uuid
+      `
+      await waitForEvent(eventsB, fixtureB.companyId, 2)
 
-    expect(eventsA).toEqual([fixtureA.companyId])
-    expect(eventsB).toEqual([fixtureB.companyId, fixtureB.companyId])
-  })
+      expect(eventsA).toEqual([fixtureA.companyId])
+      expect(eventsB).toEqual([fixtureB.companyId, fixtureB.companyId])
+    },
+    20_000,
+  )
 })

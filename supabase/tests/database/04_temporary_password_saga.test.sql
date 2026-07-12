@@ -152,9 +152,11 @@ select results_eq(
       and has_function_privilege('axsys_bff', function.oid, 'EXECUTE')
     order by function.proname$$,
   $$values
+    ('activate_file_upload_authorization'),
     ('assert_auth_session'),
     ('begin_password_recovery'),
     ('begin_temporary_password_reset'),
+    ('cancel_unissued_file_reservation'),
     ('clear_rate_limit'),
     ('complete_password_recovery'),
     ('complete_temporary_password_change'),
@@ -163,12 +165,14 @@ select results_eq(
     ('fail_closed_login_session'),
     ('fail_password_recovery'),
     ('fail_temporary_password_reset'),
+    ('list_company_user_directory'),
     ('register_auth_session'),
+    ('reserve_image_upload_intent'),
     ('revoke_sessions_and_write_logout'),
     ('rotate_app_session_after_reauthentication'),
     ('write_authenticated_audit_event'),
     ('write_security_event')$$,
-  'BFF preserva as boundaries anteriores e recebe somente as três de recovery'
+  'BFF preserva as boundaries anteriores e recebe somente as quatro fachadas Task 3'
 );
 select is_empty(
   $$select role_name || ':' || function.oid::regprocedure::text
