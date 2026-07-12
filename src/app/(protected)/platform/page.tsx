@@ -1,3 +1,5 @@
+import { CompanyCreateForm } from "@/modules/companies/ui/company-create-form"
+
 export default function PlatformPage() {
   return (
     <div className="space-y-10">
@@ -25,6 +27,8 @@ export default function PlatformPage() {
             </p>
         </div>
       </section>
+
+      <CompanyCreateForm />
     </div>
   )
 }
