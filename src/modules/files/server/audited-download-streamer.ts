@@ -20,10 +20,14 @@ export type AuditedDownloadInput = Readonly<{
   expectedSha256: string
   mimeType: string
   originalName: string
-  complete(input: {
-    outcome: DownloadAuditOutcome
-    byteClass: DownloadByteClass
-  }): Promise<void>
+  capacityLease?: () => void
+  complete(
+    input: {
+      outcome: DownloadAuditOutcome
+      byteClass: DownloadByteClass
+    },
+    signal: AbortSignal,
+  ): Promise<void>
 }>
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u
@@ -36,7 +40,7 @@ const AUDIT_COMPLETION_TIMEOUT_MS = 10_000
 const STORAGE_CANCEL_TIMEOUT_MS = 5_000
 let activeVerifications = 0
 
-function acquireVerificationSlot(): () => void {
+export function acquireDownloadCapacity(): () => void {
   if (activeVerifications >= MAX_CONCURRENT_VERIFICATIONS) {
     throw new Error(DOWNLOAD_ERROR)
   }
@@ -59,6 +63,7 @@ export function classifyDownloadBytes(byteSize: number): DownloadByteClass {
 async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
+  onTimeout?: () => void,
 ): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | null = null
   try {
@@ -66,7 +71,10 @@ async function withTimeout<T>(
       promise,
       new Promise<T>((_, reject) => {
         timeout = setTimeout(
-          () => reject(new Error(DOWNLOAD_ERROR)),
+          () => {
+            onTimeout?.()
+            reject(new Error(DOWNLOAD_ERROR))
+          },
           timeoutMs,
         )
         timeout.unref()
@@ -119,12 +127,14 @@ export function createAuditedDownloadResponse(
   let settled = false
   let verifiedChunks: readonly Uint8Array[] | null = null
   let nextChunk = 0
-  let releaseVerificationSlot: (() => void) | null = null
+  let releaseVerificationSlot: (() => void) | null =
+    input.capacityLease ?? null
   let verificationSlotLease: ReturnType<typeof setTimeout> | null = null
   let streamController: ReadableStreamDefaultController<Uint8Array> | null =
     null
   let consumerCancelled = false
   let responseErrored = false
+  let leaseExpired = false
 
   function errorResponse(
     controller: ReadableStreamDefaultController<Uint8Array>,
@@ -150,15 +160,18 @@ export function createAuditedDownloadResponse(
   async function settle(outcome: DownloadAuditOutcome): Promise<void> {
     if (settled) return
     settled = true
+    const auditAbort = new AbortController()
     await withTimeout(
-      input.complete({ outcome, byteClass }),
+      input.complete({ outcome, byteClass }, auditAbort.signal),
       AUDIT_COMPLETION_TIMEOUT_MS,
+      () => auditAbort.abort(),
     )
   }
 
-  async function spoolAndVerify(): Promise<readonly Uint8Array[]> {
-    releaseVerificationSlot = acquireVerificationSlot()
+  function armSlotLease(): void {
+    if (verificationSlotLease !== null) return
     verificationSlotLease = setTimeout(() => {
+      leaseExpired = true
       verifiedChunks = []
       releaseSlot()
       void Promise.allSettled([
@@ -167,6 +180,13 @@ export function createAuditedDownloadResponse(
       ])
       if (streamController !== null) errorResponse(streamController)
     }, VERIFICATION_SLOT_LEASE_MS)
+    verificationSlotLease.unref()
+  }
+
+  async function spoolAndVerify(): Promise<readonly Uint8Array[]> {
+    if (leaseExpired) throw new Error(DOWNLOAD_ERROR)
+    releaseVerificationSlot ??= acquireDownloadCapacity()
+    armSlotLease()
     const hash = createHash("sha256")
     const chunks: Uint8Array[] = []
     let byteSize = 0
@@ -208,6 +228,8 @@ export function createAuditedDownloadResponse(
     }
     return chunks
   }
+
+  if (releaseVerificationSlot !== null) armSlotLease()
 
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {

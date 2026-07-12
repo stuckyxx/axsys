@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import type { AccessContext } from "@/modules/auth/domain/access-context"
 import { createAuthorizedDownload } from "@/modules/files/server/authorize-file-download"
+import { acquireDownloadCapacity } from "@/modules/files/server/audited-download-streamer"
 
 const actorUserId = randomUUID()
 const sessionId = randomUUID()
@@ -33,6 +34,8 @@ function fixture(overrides: Record<string, unknown> = {}) {
   const authorization = {
     fileId,
     companyId,
+    purpose: "profile_avatar" as const,
+    ownerUserId: actorUserId,
     bucket: "axsys-private" as const,
     objectPath: `${companyId}/profile_avatar/${fileId}.webp`,
     mimeType: "image/webp",
@@ -79,12 +82,14 @@ describe("authorized file download", () => {
     })
     expect(deps.storage.downloadPrivate).toHaveBeenCalledWith(
       `${companyId}/profile_avatar/${fileId}.webp`,
+      expect.any(AbortSignal),
     )
     expect(deps.repository.completeDownloadAudit).toHaveBeenCalledWith({
       attemptId,
       completionNonce: "n".repeat(43),
       outcome: "completed",
       byteClass: "under_1_mib",
+      signal: expect.any(AbortSignal),
     })
     expect(response.headers.has("location")).toBe(false)
   })
@@ -95,6 +100,20 @@ describe("authorized file download", () => {
     await expect(
       createAuthorizedDownload(deps, {
         context,
+        fileId,
+        correlationId: randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "FILE_NOT_FOUND", status: 404 })
+    expect(deps.storage.downloadPrivate).not.toHaveBeenCalled()
+  })
+
+  it("rejects another member avatar inside the same tenant", async () => {
+    const deps = fixture({ ownerUserId: randomUUID() })
+    const memberContext = { ...context, role: "member" as const }
+
+    await expect(
+      createAuthorizedDownload(deps, {
+        context: memberContext,
         fileId,
         correlationId: randomUUID(),
       }),
@@ -120,6 +139,7 @@ describe("authorized file download", () => {
       completionNonce: "n".repeat(43),
       outcome: "stream_failed",
       byteClass: "under_1_mib",
+      signal: expect.any(AbortSignal),
     })
   })
 
@@ -141,6 +161,7 @@ describe("authorized file download", () => {
       completionNonce: "n".repeat(43),
       outcome: "stream_failed",
       byteClass: "under_1_mib",
+      signal: expect.any(AbortSignal),
     })
     existingReader.releaseLock()
   })
@@ -156,6 +177,26 @@ describe("authorized file download", () => {
         }),
       ).rejects.toMatchObject({ code: "FILE_NOT_FOUND", status: 404 })
       expect(deps.storage.downloadPrivate).not.toHaveBeenCalled()
+    }
+  })
+
+  it("rejects before opening Storage when verification capacity is full", async () => {
+    const leases = Array.from({ length: 4 }, () => acquireDownloadCapacity())
+    const deps = fixture()
+    try {
+      await expect(
+        createAuthorizedDownload(deps, {
+          context,
+          fileId,
+          correlationId: randomUUID(),
+        }),
+      ).rejects.toMatchObject({ code: "FILE_NOT_FOUND", status: 404 })
+      expect(deps.storage.downloadPrivate).not.toHaveBeenCalled()
+      expect(deps.repository.completeDownloadAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: "stream_failed" }),
+      )
+    } finally {
+      for (const lease of leases) lease()
     }
   })
 })

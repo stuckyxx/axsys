@@ -4,6 +4,7 @@ import { ApiError } from "@/lib/http/api-error"
 import type { AccessContext } from "@/modules/auth/domain/access-context"
 import type { EnabledImagePurpose } from "@/modules/files/domain/file-types"
 import {
+  acquireDownloadCapacity,
   classifyDownloadBytes,
   createAuditedDownloadResponse,
   type DownloadAuditOutcome,
@@ -15,6 +16,8 @@ type CompanyAccessContext = Extract<AccessContext, { kind: "company" }>
 export type ImageDownloadAuthorization = Readonly<{
   fileId: string
   companyId: string
+  purpose: EnabledImagePurpose
+  ownerUserId: string | null
   bucket: "axsys-private"
   objectPath: string
   mimeType: string
@@ -38,10 +41,14 @@ export type AuthorizedDownloadDependencies = Readonly<{
       completionNonce: string
       outcome: DownloadAuditOutcome
       byteClass: DownloadByteClass
+      signal: AbortSignal
     }): Promise<void>
   }>
   storage: Readonly<{
-    downloadPrivate(path: string): Promise<ReadableStream<Uint8Array>>
+    downloadPrivate(
+      path: string,
+      signal: AbortSignal,
+    ): Promise<ReadableStream<Uint8Array>>
   }>
 }>
 
@@ -50,6 +57,8 @@ const UUID =
 const SHA256_HEX = /^[0-9a-f]{64}$/u
 const NONCE = /^[A-Za-z0-9_-]{43}$/u
 const MAX_IMAGE_FILE_BYTES = 5 * 1024 * 1024
+const STORAGE_OPEN_TIMEOUT_MS = 15_000
+const AUDIT_WRITE_TIMEOUT_MS = 10_000
 const IMAGE_PURPOSES = new Set<EnabledImagePurpose>([
   "profile_avatar",
   "company_letterhead",
@@ -60,6 +69,28 @@ function notFound(): ApiError {
   return new ApiError("FILE_NOT_FOUND", 404, "Arquivo não encontrado.")
 }
 
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  onTimeout?: () => void,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => {
+          onTimeout?.()
+          reject(new Error("Download unavailable"))
+        }, timeoutMs)
+        timeout.unref()
+      }),
+    ])
+  } finally {
+    if (timeout !== null) clearTimeout(timeout)
+  }
+}
+
 function hasValidAuthorization(
   value: ImageDownloadAuthorization,
   context: CompanyAccessContext,
@@ -67,6 +98,11 @@ function hasValidAuthorization(
 ): boolean {
   const segments = value.objectPath.split("/")
   const purpose = segments[1] as EnabledImagePurpose | undefined
+  const hasPurposeAccess =
+    value.purpose === "profile_avatar"
+      ? value.ownerUserId !== null &&
+        (value.ownerUserId === context.userId || context.role === "company_admin")
+      : value.ownerUserId === null
   return (
     value.fileId === fileId &&
     value.companyId === context.companyId &&
@@ -75,6 +111,8 @@ function hasValidAuthorization(
     segments[0] === context.companyId &&
     purpose !== undefined &&
     IMAGE_PURPOSES.has(purpose) &&
+    purpose === value.purpose &&
+    hasPurposeAccess &&
     segments[2] === `${fileId}.webp` &&
     value.mimeType === "image/webp" &&
     Number.isSafeInteger(value.byteSize) &&
@@ -115,28 +153,62 @@ export async function createAuthorizedDownload(
     throw notFound()
   }
 
-  const complete = (result: {
-    outcome: DownloadAuditOutcome
-    byteClass: DownloadByteClass
-  }) =>
+  const complete = (
+    result: {
+      outcome: DownloadAuditOutcome
+      byteClass: DownloadByteClass
+    },
+    signal: AbortSignal,
+  ) =>
     deps.repository.completeDownloadAudit({
       attemptId: authorization.attemptId,
       completionNonce: authorization.completionNonce,
       ...result,
+      signal,
     })
 
-  let source: ReadableStream<Uint8Array>
+  const completeSafely = (result: {
+    outcome: DownloadAuditOutcome
+    byteClass: DownloadByteClass
+  }) => {
+    const auditAbort = new AbortController()
+    void withTimeout(
+      complete(result, auditAbort.signal),
+      AUDIT_WRITE_TIMEOUT_MS,
+      () => auditAbort.abort(),
+    ).catch(() => undefined)
+  }
+
+  let capacityLease: (() => void) | null = null
   try {
-    source = await deps.storage.downloadPrivate(authorization.objectPath)
+    capacityLease = acquireDownloadCapacity()
   } catch {
-    try {
-      await complete({
-        outcome: "stream_failed",
-        byteClass: classifyDownloadBytes(authorization.byteSize),
-      })
-    } catch {
-      // The stale-attempt sweeper closes the audit if its writer is unavailable.
-    }
+    completeSafely({
+      outcome: "stream_failed",
+      byteClass: classifyDownloadBytes(authorization.byteSize),
+    })
+    throw notFound()
+  }
+
+  let source: ReadableStream<Uint8Array>
+  const storageAbort = new AbortController()
+  try {
+    source = await withTimeout(
+      deps.storage.downloadPrivate(
+        authorization.objectPath,
+        storageAbort.signal,
+      ),
+      STORAGE_OPEN_TIMEOUT_MS,
+      () => storageAbort.abort(),
+    )
+  } catch {
+    capacityLease()
+    capacityLease = null
+    storageAbort.abort()
+    completeSafely({
+      outcome: "stream_failed",
+      byteClass: classifyDownloadBytes(authorization.byteSize),
+    })
     throw notFound()
   }
 
@@ -148,15 +220,16 @@ export async function createAuthorizedDownload(
       mimeType: authorization.mimeType,
       originalName: authorization.originalName,
       complete,
+      capacityLease,
     })
   } catch {
-    await Promise.allSettled([
-      source.cancel(),
-      complete({
-        outcome: "stream_failed",
-        byteClass: classifyDownloadBytes(authorization.byteSize),
-      }),
-    ])
+    capacityLease()
+    capacityLease = null
+    void source.cancel().catch(() => undefined)
+    completeSafely({
+      outcome: "stream_failed",
+      byteClass: classifyDownloadBytes(authorization.byteSize),
+    })
     throw notFound()
   }
 }

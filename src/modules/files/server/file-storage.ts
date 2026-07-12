@@ -1,11 +1,76 @@
 import "server-only"
 
 import { getPublicEnv } from "@/lib/env/public"
+import { getServerEnv } from "@/lib/env/server"
 import { getAdminSupabase } from "@/lib/supabase/admin"
 import type { CreateUploadIntentDependencies } from "@/modules/files/server/create-upload-intent"
 import type { FileFinalizationStorage } from "@/modules/files/server/finalize-upload-intent"
 
 type UploadCapabilityStorage = CreateUploadIntentDependencies["storage"]
+
+export type PrivateDownloadStorage = Readonly<{
+  downloadPrivate(
+    path: string,
+    signal: AbortSignal,
+  ): Promise<ReadableStream<Uint8Array>>
+}>
+
+const STORAGE_PATH_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u
+const PRIVATE_DOWNLOAD_FAILURE = "Private download unavailable"
+
+export function createPrivateDownloadStorage(input: {
+  baseUrl: string
+  secretKey: string
+  fetchImplementation?: typeof fetch
+}): PrivateDownloadStorage {
+  const fetchImplementation = input.fetchImplementation ?? fetch
+  return Object.freeze({
+    async downloadPrivate(path, signal) {
+      const segments = path.split("/")
+      if (
+        segments.length < 3 ||
+        segments.length > 6 ||
+        !segments.every((segment) => STORAGE_PATH_SEGMENT.test(segment))
+      ) {
+        throw new Error(PRIVATE_DOWNLOAD_FAILURE)
+      }
+      const encodedPath = segments.map(encodeURIComponent).join("/")
+      let response: Response
+      try {
+        response = await fetchImplementation(
+          `${input.baseUrl.replace(/\/$/u, "")}/storage/v1/object/authenticated/axsys-private/${encodedPath}`,
+          {
+            cache: "no-store",
+            redirect: "error",
+            signal,
+            headers: {
+              apikey: input.secretKey,
+              Authorization: `Bearer ${input.secretKey}`,
+            },
+          },
+        )
+      } catch {
+        throw new Error(PRIVATE_DOWNLOAD_FAILURE)
+      }
+      if (!response.ok || response.body === null) {
+        try {
+          await response.body?.cancel()
+        } catch {
+          // The normalized failure never depends on Storage response details.
+        }
+        throw new Error(PRIVATE_DOWNLOAD_FAILURE)
+      }
+      return response.body
+    },
+  })
+}
+
+export function getPrivateDownloadStorage(): PrivateDownloadStorage {
+  return createPrivateDownloadStorage({
+    baseUrl: getPublicEnv().NEXT_PUBLIC_SUPABASE_URL,
+    secretKey: getServerEnv().SUPABASE_SECRET_KEY,
+  })
+}
 
 export function getResumableUploadEndpoint(): string {
   return `${getPublicEnv().NEXT_PUBLIC_SUPABASE_URL.replace(/\/$/u, "")}/storage/v1/upload/resumable`

@@ -36,7 +36,7 @@ describe("audited download streamer", () => {
     expect(complete).toHaveBeenCalledWith({
       outcome: "completed",
       byteClass: "under_1_mib",
-    })
+    }, expect.any(AbortSignal))
     expect(response.headers.get("cache-control")).toBe(
       "private, no-store, max-age=0",
     )
@@ -64,7 +64,7 @@ describe("audited download streamer", () => {
     expect(complete).toHaveBeenCalledWith({
       outcome: "integrity_failed",
       byteClass: "under_1_mib",
-    })
+    }, expect.any(AbortSignal))
   })
 
   it("keeps RFC 5987 filenames valid at Unicode truncation boundaries", async () => {
@@ -108,7 +108,7 @@ describe("audited download streamer", () => {
     expect(complete).toHaveBeenCalledWith({
       outcome: "aborted",
       byteClass: "under_1_mib",
-    })
+    }, expect.any(AbortSignal))
   })
 
   it("audits source failures without exposing the underlying error", async () => {
@@ -131,7 +131,7 @@ describe("audited download streamer", () => {
     expect(complete).toHaveBeenCalledWith({
       outcome: "stream_failed",
       byteClass: "under_1_mib",
-    })
+    }, expect.any(AbortSignal))
   })
 
   it("rejects an oversized contract before acquiring the source", () => {
@@ -262,7 +262,7 @@ describe("audited download streamer", () => {
     expect(rejectedAudit).toHaveBeenCalledWith({
       outcome: "stream_failed",
       byteClass: "under_1_mib",
-    })
+    }, expect.any(AbortSignal))
 
     await Promise.all(readers.map((reader) => reader.cancel()))
     const bytes = new Uint8Array([9])
