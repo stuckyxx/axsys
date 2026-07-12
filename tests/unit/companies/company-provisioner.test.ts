@@ -45,6 +45,7 @@ function fixture() {
 
 const command = {
   actorUserId: randomUUID(),
+  sessionId: randomUUID(),
   idempotencyKey: "idempotency-key-2026-0001",
   correlationId: randomUUID(),
   input,
@@ -61,10 +62,12 @@ describe("company provisioner", () => {
       password: "frase provisoria segura 2026",
       emailConfirm: true,
     })
-    expect(deps.repository.markAuthCreated).toHaveBeenCalledWith(
-      deps.operationId,
-      deps.authUserId,
-    )
+    expect(deps.repository.markAuthCreated).toHaveBeenCalledWith({
+      operationId: deps.operationId,
+      actorUserId: command.actorUserId,
+      sessionId: command.sessionId,
+      authUserId: deps.authUserId,
+    })
     expect(deps.repository.commit.mock.invocationCallOrder[0]).toBeGreaterThan(
       deps.auth.createUser.mock.invocationCallOrder[0]!,
     )
@@ -78,9 +81,31 @@ describe("company provisioner", () => {
       provisionCompany({ ...deps, fingerprint: vi.fn(() => "b".repeat(64)) }, command),
     ).rejects.toMatchObject({ code: "COMPANY_CREATE_FAILED" })
     expect(deps.auth.deleteUser).toHaveBeenCalledWith(deps.authUserId)
-    expect(deps.repository.markCompensated).toHaveBeenCalledWith(
-      deps.operationId,
-      "DB_COMMIT_FAILED",
+    expect(deps.repository.markCompensated).toHaveBeenCalledWith({
+      operationId: deps.operationId,
+      actorUserId: command.actorUserId,
+      sessionId: command.sessionId,
+      reason: "DB_COMMIT_FAILED",
+    })
+  })
+
+  it("replays a committed operation without creating another Auth user", async () => {
+    const deps = fixture()
+    deps.repository.reserve.mockResolvedValue({
+      id: deps.operationId,
+      status: "committed",
+      authUserId: deps.authUserId,
+    })
+
+    await expect(
+      provisionCompany({ ...deps, fingerprint: vi.fn(() => "e".repeat(64)) }, command),
+    ).resolves.toEqual(deps.result)
+    expect(deps.auth.createUser).not.toHaveBeenCalled()
+    expect(deps.repository.commit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operationId: deps.operationId,
+        authUserId: deps.authUserId,
+      }),
     )
   })
 
@@ -95,10 +120,12 @@ describe("company provisioner", () => {
       code: "COMPANY_CREATE_COMPENSATION_PENDING",
     })
     expect(deps.auth.banUser).toHaveBeenCalledWith(deps.authUserId)
-    expect(deps.repository.markCompensationRequired).toHaveBeenCalledWith(
-      deps.operationId,
-      "AUTH_DELETE_FAILED",
-    )
+    expect(deps.repository.markCompensationRequired).toHaveBeenCalledWith({
+      operationId: deps.operationId,
+      actorUserId: command.actorUserId,
+      sessionId: command.sessionId,
+      reason: "AUTH_DELETE_FAILED",
+    })
   })
 
   it("rejects weak provisional passwords before reserving the saga", async () => {

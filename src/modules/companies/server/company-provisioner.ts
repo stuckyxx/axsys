@@ -16,35 +16,45 @@ type ProvisionedCompany = Readonly<{
 type ProvisioningOperation =
   | Readonly<{ id: string; status: "reserved" }>
   | Readonly<{ id: string; status: "auth_created"; authUserId: string }>
-  | Readonly<{
-      id: string
-      status: "committed"
-      result: ProvisionedCompany
-    }>
+  | Readonly<{ id: string; status: "committed"; authUserId: string }>
 
 export type CompanyProvisioningDependencies = Readonly<{
   repository: Readonly<{
     reserve(input: {
       actorUserId: string
+      sessionId: string
       idempotencyKeyHash: string
       requestHash: string
       subjectEmailHash: string
       correlationId: string
     }): Promise<ProvisioningOperation>
-    markAuthCreated(operationId: string, authUserId: string): Promise<void>
+    markAuthCreated(input: {
+      operationId: string
+      actorUserId: string
+      sessionId: string
+      authUserId: string
+    }): Promise<void>
     commit(input: {
       operationId: string
       actorUserId: string
+      sessionId: string
       authUserId: string
       correlationId: string
       company: Omit<CreateCompanyInput, "firstAdmin">
       firstAdmin: Omit<CreateCompanyInput["firstAdmin"], "temporaryPassword">
     }): Promise<ProvisionedCompany>
-    markCompensated(operationId: string, reason: "DB_COMMIT_FAILED"): Promise<void>
-    markCompensationRequired(
-      operationId: string,
-      reason: "AUTH_DELETE_FAILED",
-    ): Promise<void>
+    markCompensated(input: {
+      operationId: string
+      actorUserId: string
+      sessionId: string
+      reason: "DB_COMMIT_FAILED"
+    }): Promise<void>
+    markCompensationRequired(input: {
+      operationId: string
+      actorUserId: string
+      sessionId: string
+      reason: "AUTH_DELETE_FAILED"
+    }): Promise<void>
   }>
   auth: Readonly<{
     createUser(input: {
@@ -86,10 +96,17 @@ async function compensateAuthUser(
   deps: CompanyProvisioningDependencies,
   operationId: string,
   authUserId: string,
+  actorUserId: string,
+  sessionId: string,
 ): Promise<never> {
   try {
     await deps.auth.deleteUser(authUserId)
-    await deps.repository.markCompensated(operationId, "DB_COMMIT_FAILED")
+    await deps.repository.markCompensated({
+      operationId,
+      actorUserId,
+      sessionId,
+      reason: "DB_COMMIT_FAILED",
+    })
     throw provisioningError("COMPANY_CREATE_FAILED")
   } catch (error) {
     if (error instanceof ApiError) throw error
@@ -98,10 +115,12 @@ async function compensateAuthUser(
     } catch {
       // Reconciliation remains mandatory even if the defensive ban also fails.
     }
-    await deps.repository.markCompensationRequired(
+    await deps.repository.markCompensationRequired({
       operationId,
-      "AUTH_DELETE_FAILED",
-    )
+      actorUserId,
+      sessionId,
+      reason: "AUTH_DELETE_FAILED",
+    })
     throw provisioningError("COMPANY_CREATE_COMPENSATION_PENDING")
   }
 }
@@ -110,6 +129,7 @@ export async function provisionCompany(
   deps: CompanyProvisioningDependencies,
   command: Readonly<{
     actorUserId: string
+    sessionId: string
     idempotencyKey: string
     correlationId: string
     input: CreateCompanyInput
@@ -119,6 +139,7 @@ export async function provisionCompany(
   await validatePassword(input.firstAdmin.temporaryPassword)
   const operation = await deps.repository.reserve({
     actorUserId: command.actorUserId,
+    sessionId: command.sessionId,
     idempotencyKeyHash: deps.fingerprint(
       "company-idempotency-key",
       command.idempotencyKey,
@@ -130,10 +151,8 @@ export async function provisionCompany(
     ),
     correlationId: command.correlationId,
   })
-  if (operation.status === "committed") return operation.result
-
   let authUserId: string
-  if (operation.status === "auth_created") {
+  if (operation.status === "auth_created" || operation.status === "committed") {
     authUserId = operation.authUserId
   } else {
     let created: { id: string }
@@ -148,9 +167,20 @@ export async function provisionCompany(
     }
     authUserId = created.id
     try {
-      await deps.repository.markAuthCreated(operation.id, authUserId)
+      await deps.repository.markAuthCreated({
+        operationId: operation.id,
+        actorUserId: command.actorUserId,
+        sessionId: command.sessionId,
+        authUserId,
+      })
     } catch {
-      return compensateAuthUser(deps, operation.id, authUserId)
+      return compensateAuthUser(
+        deps,
+        operation.id,
+        authUserId,
+        command.actorUserId,
+        command.sessionId,
+      )
     }
   }
 
@@ -164,12 +194,19 @@ export async function provisionCompany(
     return await deps.repository.commit({
       operationId: operation.id,
       actorUserId: command.actorUserId,
+      sessionId: command.sessionId,
       authUserId,
       correlationId: command.correlationId,
       company,
       firstAdmin: safeFirstAdmin,
     })
   } catch {
-    return compensateAuthUser(deps, operation.id, authUserId)
+    return compensateAuthUser(
+      deps,
+      operation.id,
+      authUserId,
+      command.actorUserId,
+      command.sessionId,
+    )
   }
 }
