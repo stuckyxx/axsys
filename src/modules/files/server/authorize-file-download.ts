@@ -2,7 +2,10 @@ import "server-only"
 
 import { ApiError } from "@/lib/http/api-error"
 import type { AccessContext } from "@/modules/auth/domain/access-context"
-import type { EnabledImagePurpose } from "@/modules/files/domain/file-types"
+import type {
+  EnabledImagePurpose,
+  ImageDownloadAuthorization,
+} from "@/modules/files/domain/file-types"
 import {
   acquireDownloadCapacity,
   classifyDownloadBytes,
@@ -12,21 +15,6 @@ import {
 } from "@/modules/files/server/audited-download-streamer"
 
 type CompanyAccessContext = Extract<AccessContext, { kind: "company" }>
-
-export type ImageDownloadAuthorization = Readonly<{
-  fileId: string
-  companyId: string
-  purpose: EnabledImagePurpose
-  ownerUserId: string | null
-  bucket: "axsys-private"
-  objectPath: string
-  mimeType: string
-  byteSize: number
-  sha256: string
-  originalName: string
-  attemptId: string
-  completionNonce: string
-}>
 
 export type AuthorizedDownloadDependencies = Readonly<{
   repository: Readonly<{

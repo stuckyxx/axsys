@@ -5,19 +5,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { POST as createUpload } from "@/app/api/files/uploads/route"
 import { POST as finalizeUpload } from "@/app/api/files/uploads/[intentId]/finalize/route"
+import { GET as downloadFile } from "@/app/api/files/[fileId]/download/route"
 
 const mocks = vi.hoisted(() => ({
   authorize: vi.fn(),
   create: vi.fn(),
   finalize: vi.fn(),
+  download: vi.fn(),
   repository: Object.freeze({}),
+  downloadRepository: Object.freeze({}),
   capabilityStorage: Object.freeze({}),
   finalizationStorage: Object.freeze({}),
+  downloadStorage: Object.freeze({}),
   scanner: Object.freeze({}),
 }))
 
 vi.mock("@/modules/files/server/file-route-security", () => ({
   authorizeFileMutation: mocks.authorize,
+  authorizeFileDownload: mocks.authorize,
 }))
 vi.mock("@/modules/files/server/create-upload-intent", () => ({
   createUploadIntent: mocks.create,
@@ -25,14 +30,19 @@ vi.mock("@/modules/files/server/create-upload-intent", () => ({
 vi.mock("@/modules/files/server/finalize-upload-intent", () => ({
   finalizeUploadIntent: mocks.finalize,
 }))
+vi.mock("@/modules/files/server/authorize-file-download", () => ({
+  createAuthorizedDownload: mocks.download,
+}))
 vi.mock("@/modules/files/server/file-repository", () => ({
   getFileRepository: () => mocks.repository,
+  getImageDownloadRepository: () => mocks.downloadRepository,
 }))
 vi.mock("@/modules/files/server/file-storage", () => ({
   getFileFinalizationStorage: () => mocks.finalizationStorage,
   getResumableUploadEndpoint: () =>
     "http://127.0.0.1:54321/storage/v1/upload/resumable",
   getUploadCapabilityStorage: () => mocks.capabilityStorage,
+  getPrivateDownloadStorage: () => mocks.downloadStorage,
 }))
 vi.mock("@/modules/files/server/clamav-client", () => ({
   getClamAvScanner: () => mocks.scanner,
@@ -60,6 +70,7 @@ const context = Object.freeze({
 
 const correlationId = "80000000-0000-4000-8000-000000000001"
 const intentId = "10000000-0000-4000-8000-000000000001"
+const fileId = "50000000-0000-4000-8000-000000000001"
 
 beforeEach(() => {
   mocks.authorize.mockResolvedValue(context)
@@ -165,10 +176,45 @@ describe("file upload route handlers", () => {
     expect(mocks.create).not.toHaveBeenCalled()
   })
 
+  it("streams the final private response with no-store headers", async () => {
+    mocks.download.mockResolvedValue(
+      new Response("verified bytes", {
+        headers: {
+          "content-type": "image/webp",
+          "content-disposition": "attachment; filename=avatar.webp",
+          "x-content-type-options": "nosniff",
+          "content-security-policy": "sandbox",
+        },
+      }),
+    )
+    const request = new Request(
+      `https://axsys.test/api/files/${fileId}/download`,
+      { headers: { "x-correlation-id": correlationId } },
+    )
+
+    const response = await downloadFile(request, {
+      params: Promise.resolve({ fileId }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("cache-control")).toContain("no-store")
+    expect(response.headers.get("vary")).toContain("Cookie")
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff")
+    await expect(response.text()).resolves.toBe("verified bytes")
+    expect(mocks.download).toHaveBeenCalledWith(
+      {
+        repository: mocks.downloadRepository,
+        storage: mocks.downloadStorage,
+      },
+      { context, fileId, correlationId },
+    )
+  })
+
   it("keeps Storage credentials and browser session APIs out of route source", () => {
     const source = [
       "src/app/api/files/uploads/route.ts",
       "src/app/api/files/uploads/[intentId]/finalize/route.ts",
+      "src/app/api/files/[fileId]/download/route.ts",
     ]
       .map((path) => readFileSync(resolve(path), "utf8"))
       .join("\n")

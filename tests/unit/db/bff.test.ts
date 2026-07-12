@@ -12,10 +12,11 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe("bffDb boundary", () => {
-  it("exports only the twenty-nine typed security-control, password, upload and directory operations", () => {
+  it("exports only the thirty-one typed security-control, password, upload and directory operations", () => {
     expect(Object.keys(bffDb).sort()).toEqual([
       "activateFileUploadAuthorization",
       "assertAuthSession",
+      "authorizeImageFileDownload",
       "beginFileFinalization",
       "beginPasswordRecovery",
       "beginTemporaryPasswordReset",
@@ -23,6 +24,7 @@ describe("bffDb boundary", () => {
       "cancelUnissuedFileReservation",
       "claimUploadAuthorizationsForRetirement",
       "clearRateLimit",
+      "completeDownloadAudit",
       "completePasswordRecovery",
       "completeTemporaryPasswordChange",
       "completeTemporaryPasswordReset",
@@ -352,12 +354,14 @@ describe("bffDb boundary", () => {
     expect(staticRoutineNames).toEqual([
       "activate_file_upload_authorization",
       "assert_auth_session",
+      "authorize_image_file_download",
       "begin_password_recovery",
       "begin_temporary_password_reset",
       "cancel_stale_reserved_upload_intents",
       "cancel_unissued_file_reservation",
       "claim_upload_authorizations_for_retirement",
       "clear_rate_limit",
+      "complete_download_audit",
       "complete_password_recovery",
       "complete_temporary_password_change",
       "complete_temporary_password_reset",

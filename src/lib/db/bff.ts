@@ -5,6 +5,7 @@ import { getServerEnv } from "@/lib/env/server"
 import type {
   FileFinalizationState,
   FileObject,
+  ImageDownloadAuthorization,
   UploadReservationDTO,
 } from "@/modules/files/domain/file-types"
 
@@ -709,6 +710,67 @@ export const bffDb = {
       from private.cancel_stale_reserved_upload_intents(${limit})
     `
     return toSafeInteger(row.cancelled)
+  },
+
+  async authorizeImageFileDownload(input: {
+    actorUserId: string
+    sessionId: string
+    fileId: string
+    correlationId: string
+  }): Promise<ImageDownloadAuthorization> {
+    const sql = await getSql()
+    const [row] = await sql<
+      [(Omit<ImageDownloadAuthorization, "byteSize"> & {
+        byteSize: number | string
+      })]
+    >`
+      select file_id as "fileId",
+             company_id as "companyId",
+             purpose,
+             owner_user_id as "ownerUserId",
+             bucket,
+             object_path as "objectPath",
+             mime_type as "mimeType",
+             byte_size as "byteSize",
+             sha256,
+             original_name as "originalName",
+             attempt_id as "attemptId",
+             completion_nonce as "completionNonce"
+      from private.authorize_image_file_download(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.fileId}::uuid,
+        ${input.correlationId}::uuid
+      )
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return { ...row, byteSize: toSafeInteger(row.byteSize) }
+  },
+
+  async completeDownloadAudit(input: {
+    attemptId: string
+    completionNonce: string
+    outcome: "completed" | "aborted" | "integrity_failed" | "stream_failed"
+    byteClass: "empty" | "under_1_mib" | "under_10_mib" | "at_least_10_mib"
+    signal: AbortSignal
+  }): Promise<void> {
+    if (input.signal.aborted) throw new Error(BFF_DATABASE_FAILURE)
+    const sql = await getSql()
+    const query = sql`
+      select private.complete_download_audit(
+        ${input.attemptId}::uuid,
+        ${input.completionNonce},
+        ${input.outcome},
+        ${input.byteClass}
+      )
+    `
+    const cancel = () => query.cancel()
+    input.signal.addEventListener("abort", cancel, { once: true })
+    try {
+      await query
+    } finally {
+      input.signal.removeEventListener("abort", cancel)
+    }
   },
 
   async listCompanyUserDirectory(input: {

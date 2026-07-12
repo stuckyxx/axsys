@@ -3,6 +3,7 @@ import "server-only"
 import { bffDb } from "@/lib/db/bff"
 import type { CreateUploadIntentDependencies } from "@/modules/files/server/create-upload-intent"
 import type { FileFinalizationRepository } from "@/modules/files/server/finalize-upload-intent"
+import type { AuthorizedDownloadDependencies } from "@/modules/files/server/authorize-file-download"
 
 export type FileRepository =
   CreateUploadIntentDependencies["repository"] & FileFinalizationRepository
@@ -47,5 +48,13 @@ export function getFileRepository(): FileRepository {
     async releaseForRetry(input) {
       await bffDb.releaseFileFinalizationForRetry(input)
     },
+  })
+}
+
+export function getImageDownloadRepository(): AuthorizedDownloadDependencies["repository"] {
+  return Object.freeze({
+    authorizeImageDownload: (input) =>
+      bffDb.authorizeImageFileDownload(input),
+    completeDownloadAudit: (input) => bffDb.completeDownloadAudit(input),
   })
 }

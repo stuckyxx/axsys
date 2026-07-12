@@ -55,6 +55,21 @@ export type UploadReservationDTO = Readonly<{
   declaredSize: number
 }>
 
+export type ImageDownloadAuthorization = Readonly<{
+  fileId: string
+  companyId: string
+  purpose: EnabledImagePurpose
+  ownerUserId: string | null
+  bucket: "axsys-private"
+  objectPath: string
+  mimeType: "image/webp"
+  byteSize: number
+  sha256: string
+  originalName: string
+  attemptId: string
+  completionNonce: string
+}>
+
 export type UploadPolicy = Readonly<{
   maxBytes: number
   declaredMimeTypes: readonly string[]
