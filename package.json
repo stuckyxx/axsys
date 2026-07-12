@@ -24,7 +24,7 @@
     "db:test": "supabase test db",
     "db:lint": "supabase db lint --local --level warning --fail-on warning",
     "db:advisors": "supabase db advisors --local --fail-on warn",
-    "db:types": "supabase gen types typescript --local --schema public > src/lib/supabase/database.types.ts",
+    "db:types": "tsx scripts/generate-database-types.ts",
     "bootstrap:local": "tsx scripts/bootstrap-local.ts",
     "files:start": "docker compose -f docker-compose.files.yml up -d --wait",
     "files:stop": "docker compose -f docker-compose.files.yml down",

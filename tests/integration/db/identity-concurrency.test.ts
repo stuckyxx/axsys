@@ -414,6 +414,10 @@ async function cleanupFixtures(sql: Sql): Promise<void> {
       }
 
       await transaction`
+        delete from private.company_storage_usage
+        where company_id = any(${[...Object.values(COMPANIES)]}::uuid[])
+      `
+      await transaction`
         delete from public.companies
         where id = any(${[...Object.values(COMPANIES)]}::uuid[])
       `

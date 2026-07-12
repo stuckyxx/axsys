@@ -131,6 +131,124 @@ export type Database = {
           },
         ]
       }
+      company_bank_accounts: {
+        Row: {
+          account_ciphertext: string
+          account_iv: string
+          account_key_version: number
+          account_last4: string
+          account_tag: string
+          account_type: Database["public"]["Enums"]["bank_account_type"]
+          archived_at: string | null
+          bank_code: string
+          bank_name: string
+          branch_ciphertext: string
+          branch_iv: string
+          branch_key_version: number
+          branch_last4: string
+          branch_tag: string
+          company_id: string
+          created_at: string
+          created_by: string
+          holder_document_ciphertext: string | null
+          holder_document_iv: string | null
+          holder_document_key_version: number | null
+          holder_document_last4: string | null
+          holder_document_tag: string | null
+          holder_name: string
+          id: string
+          is_default: boolean
+          status: Database["public"]["Enums"]["bank_account_status"]
+          updated_at: string
+          updated_by: string
+          version: number
+        }
+        Insert: {
+          account_ciphertext: string
+          account_iv: string
+          account_key_version: number
+          account_last4: string
+          account_tag: string
+          account_type: Database["public"]["Enums"]["bank_account_type"]
+          archived_at?: string | null
+          bank_code: string
+          bank_name: string
+          branch_ciphertext: string
+          branch_iv: string
+          branch_key_version: number
+          branch_last4: string
+          branch_tag: string
+          company_id: string
+          created_at?: string
+          created_by: string
+          holder_document_ciphertext?: string | null
+          holder_document_iv?: string | null
+          holder_document_key_version?: number | null
+          holder_document_last4?: string | null
+          holder_document_tag?: string | null
+          holder_name: string
+          id?: string
+          is_default?: boolean
+          status?: Database["public"]["Enums"]["bank_account_status"]
+          updated_at?: string
+          updated_by: string
+          version?: number
+        }
+        Update: {
+          account_ciphertext?: string
+          account_iv?: string
+          account_key_version?: number
+          account_last4?: string
+          account_tag?: string
+          account_type?: Database["public"]["Enums"]["bank_account_type"]
+          archived_at?: string | null
+          bank_code?: string
+          bank_name?: string
+          branch_ciphertext?: string
+          branch_iv?: string
+          branch_key_version?: number
+          branch_last4?: string
+          branch_tag?: string
+          company_id?: string
+          created_at?: string
+          created_by?: string
+          holder_document_ciphertext?: string | null
+          holder_document_iv?: string | null
+          holder_document_key_version?: number | null
+          holder_document_last4?: string | null
+          holder_document_tag?: string | null
+          holder_name?: string
+          id?: string
+          is_default?: boolean
+          status?: Database["public"]["Enums"]["bank_account_status"]
+          updated_at?: string
+          updated_by?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_bank_accounts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_bank_accounts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "company_bank_accounts_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
       company_memberships: {
         Row: {
           company_id: string
@@ -202,6 +320,343 @@ export type Database = {
             isOneToOne: true
             referencedRelation: "profiles"
             referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      company_settings: {
+        Row: {
+          address_city: string | null
+          address_complement: string | null
+          address_neighborhood: string | null
+          address_number: string | null
+          address_postal_code: string | null
+          address_state: string | null
+          address_street: string | null
+          company_id: string
+          consolidated_address: string | null
+          letterhead_file_id: string | null
+          representative_document_ciphertext: string | null
+          representative_document_iv: string | null
+          representative_document_key_version: number | null
+          representative_document_last4: string | null
+          representative_document_tag: string | null
+          representative_name: string | null
+          representative_role: string | null
+          signature_file_id: string | null
+          tax_rate: number
+          updated_at: string
+          updated_by: string
+          version: number
+        }
+        Insert: {
+          address_city?: string | null
+          address_complement?: string | null
+          address_neighborhood?: string | null
+          address_number?: string | null
+          address_postal_code?: string | null
+          address_state?: string | null
+          address_street?: string | null
+          company_id: string
+          consolidated_address?: never
+          letterhead_file_id?: string | null
+          representative_document_ciphertext?: string | null
+          representative_document_iv?: string | null
+          representative_document_key_version?: number | null
+          representative_document_last4?: string | null
+          representative_document_tag?: string | null
+          representative_name?: string | null
+          representative_role?: string | null
+          signature_file_id?: string | null
+          tax_rate?: number
+          updated_at?: string
+          updated_by: string
+          version?: number
+        }
+        Update: {
+          address_city?: string | null
+          address_complement?: string | null
+          address_neighborhood?: string | null
+          address_number?: string | null
+          address_postal_code?: string | null
+          address_state?: string | null
+          address_street?: string | null
+          company_id?: string
+          consolidated_address?: never
+          letterhead_file_id?: string | null
+          representative_document_ciphertext?: string | null
+          representative_document_iv?: string | null
+          representative_document_key_version?: number | null
+          representative_document_last4?: string | null
+          representative_document_tag?: string | null
+          representative_name?: string | null
+          representative_role?: string | null
+          signature_file_id?: string | null
+          tax_rate?: number
+          updated_at?: string
+          updated_by?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_settings_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_settings_company_id_letterhead_file_id_fkey"
+            columns: ["company_id", "letterhead_file_id"]
+            isOneToOne: false
+            referencedRelation: "file_objects"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "company_settings_company_id_signature_file_id_fkey"
+            columns: ["company_id", "signature_file_id"]
+            isOneToOne: false
+            referencedRelation: "file_objects"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "company_settings_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      company_settings_drafts: {
+        Row: {
+          base_version: number
+          company_id: string
+          payload: Json
+          updated_at: string
+          user_id: string
+          version: number
+        }
+        Insert: {
+          base_version: number
+          company_id: string
+          payload?: Json
+          updated_at?: string
+          user_id: string
+          version?: number
+        }
+        Update: {
+          base_version?: number
+          company_id?: string
+          payload?: Json
+          updated_at?: string
+          user_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_settings_drafts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_settings_drafts_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      file_objects: {
+        Row: {
+          archived_at: string | null
+          bucket: string
+          byte_size: number
+          company_id: string
+          created_at: string
+          created_by: string
+          detected_mime: string
+          id: string
+          object_path: string
+          original_name: string
+          owner_user_id: string | null
+          promoted_at: string | null
+          purpose: Database["public"]["Enums"]["file_purpose"]
+          quota_released_at: string | null
+          retirement_claim_id: string | null
+          retirement_claimed_at: string | null
+          retirement_not_before: string | null
+          scan_status: Database["public"]["Enums"]["file_scan_status"]
+          sha256: string
+          status: Database["public"]["Enums"]["file_status"]
+          storage_deleted_at: string | null
+        }
+        Insert: {
+          archived_at?: string | null
+          bucket: string
+          byte_size: number
+          company_id: string
+          created_at?: string
+          created_by: string
+          detected_mime: string
+          id?: string
+          object_path: string
+          original_name: string
+          owner_user_id?: string | null
+          promoted_at?: string | null
+          purpose: Database["public"]["Enums"]["file_purpose"]
+          quota_released_at?: string | null
+          retirement_claim_id?: string | null
+          retirement_claimed_at?: string | null
+          retirement_not_before?: string | null
+          scan_status: Database["public"]["Enums"]["file_scan_status"]
+          sha256: string
+          status: Database["public"]["Enums"]["file_status"]
+          storage_deleted_at?: string | null
+        }
+        Update: {
+          archived_at?: string | null
+          bucket?: string
+          byte_size?: number
+          company_id?: string
+          created_at?: string
+          created_by?: string
+          detected_mime?: string
+          id?: string
+          object_path?: string
+          original_name?: string
+          owner_user_id?: string | null
+          promoted_at?: string | null
+          purpose?: Database["public"]["Enums"]["file_purpose"]
+          quota_released_at?: string | null
+          retirement_claim_id?: string | null
+          retirement_claimed_at?: string | null
+          retirement_not_before?: string | null
+          scan_status?: Database["public"]["Enums"]["file_scan_status"]
+          sha256?: string
+          status?: Database["public"]["Enums"]["file_status"]
+          storage_deleted_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "file_objects_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "file_objects_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "file_objects_owner_user_id_fkey"
+            columns: ["owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      file_upload_intents: {
+        Row: {
+          actor_user_id: string
+          authorization_cleanup_claim_id: string | null
+          authorization_cleanup_claimed_at: string | null
+          authorization_issued_at: string | null
+          authorization_retired_at: string | null
+          cleanup_error_code: string | null
+          cleanup_not_before: string | null
+          company_id: string
+          created_at: string
+          declared_mime: string
+          declared_name: string
+          declared_size: number
+          file_object_id: string | null
+          id: string
+          purpose: Database["public"]["Enums"]["file_purpose"]
+          quarantine_object_path: string
+          quota_hold_bytes: number
+          status: Database["public"]["Enums"]["upload_intent_status"]
+          target_resource_id: string | null
+          updated_at: string
+          upload_authorization_expires_at: string | null
+          version: number
+        }
+        Insert: {
+          actor_user_id: string
+          authorization_cleanup_claim_id?: string | null
+          authorization_cleanup_claimed_at?: string | null
+          authorization_issued_at?: string | null
+          authorization_retired_at?: string | null
+          cleanup_error_code?: string | null
+          cleanup_not_before?: string | null
+          company_id: string
+          created_at?: string
+          declared_mime: string
+          declared_name: string
+          declared_size: number
+          file_object_id?: string | null
+          id?: string
+          purpose: Database["public"]["Enums"]["file_purpose"]
+          quarantine_object_path: string
+          quota_hold_bytes: number
+          status?: Database["public"]["Enums"]["upload_intent_status"]
+          target_resource_id?: string | null
+          updated_at?: string
+          upload_authorization_expires_at?: string | null
+          version?: number
+        }
+        Update: {
+          actor_user_id?: string
+          authorization_cleanup_claim_id?: string | null
+          authorization_cleanup_claimed_at?: string | null
+          authorization_issued_at?: string | null
+          authorization_retired_at?: string | null
+          cleanup_error_code?: string | null
+          cleanup_not_before?: string | null
+          company_id?: string
+          created_at?: string
+          declared_mime?: string
+          declared_name?: string
+          declared_size?: number
+          file_object_id?: string | null
+          id?: string
+          purpose?: Database["public"]["Enums"]["file_purpose"]
+          quarantine_object_path?: string
+          quota_hold_bytes?: number
+          status?: Database["public"]["Enums"]["upload_intent_status"]
+          target_resource_id?: string | null
+          updated_at?: string
+          upload_authorization_expires_at?: string | null
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "file_upload_intents_actor_user_id_fkey"
+            columns: ["actor_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "file_upload_intents_company_id_file_object_id_fkey"
+            columns: ["company_id", "file_object_id"]
+            isOneToOne: false
+            referencedRelation: "file_objects"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "file_upload_intents_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -348,6 +803,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          avatar_file_id: string | null
           created_at: string
           display_name: string
           email: string
@@ -361,6 +817,7 @@ export type Database = {
           version: number
         }
         Insert: {
+          avatar_file_id?: string | null
           created_at?: string
           display_name: string
           email: string
@@ -374,6 +831,7 @@ export type Database = {
           version?: number
         }
         Update: {
+          avatar_file_id?: string | null
           created_at?: string
           display_name?: string
           email?: string
@@ -386,7 +844,78 @@ export type Database = {
           user_id?: string
           version?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "profiles_avatar_file_id_fkey"
+            columns: ["avatar_file_id"]
+            isOneToOne: false
+            referencedRelation: "file_objects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      provisioning_operations: {
+        Row: {
+          actor_user_id: string
+          auth_user_id: string | null
+          company_id: string | null
+          correlation_id: string
+          created_at: string
+          id: string
+          idempotency_key: string
+          kind: Database["public"]["Enums"]["provisioning_kind"]
+          last_error_code: string | null
+          request_hash: string
+          status: Database["public"]["Enums"]["provisioning_status"]
+          subject_email_hash: string
+          updated_at: string
+        }
+        Insert: {
+          actor_user_id: string
+          auth_user_id?: string | null
+          company_id?: string | null
+          correlation_id: string
+          created_at?: string
+          id?: string
+          idempotency_key: string
+          kind: Database["public"]["Enums"]["provisioning_kind"]
+          last_error_code?: string | null
+          request_hash: string
+          status?: Database["public"]["Enums"]["provisioning_status"]
+          subject_email_hash: string
+          updated_at?: string
+        }
+        Update: {
+          actor_user_id?: string
+          auth_user_id?: string | null
+          company_id?: string | null
+          correlation_id?: string
+          created_at?: string
+          id?: string
+          idempotency_key?: string
+          kind?: Database["public"]["Enums"]["provisioning_kind"]
+          last_error_code?: string | null
+          request_hash?: string
+          status?: Database["public"]["Enums"]["provisioning_status"]
+          subject_email_hash?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "provisioning_operations_actor_user_id_fkey"
+            columns: ["actor_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "provisioning_operations_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       security_events: {
         Row: {
@@ -437,7 +966,147 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      company_bank_account_summaries: {
+        Row: {
+          account_type: Database["public"]["Enums"]["bank_account_type"] | null
+          bank_code: string | null
+          bank_name: string | null
+          company_id: string | null
+          created_at: string | null
+          holder_name: string | null
+          id: string | null
+          is_default: boolean | null
+          masked_account: string | null
+          masked_branch: string | null
+          masked_holder_document: string | null
+          status: Database["public"]["Enums"]["bank_account_status"] | null
+          updated_at: string | null
+          version: number | null
+        }
+        Insert: {
+          account_type?: Database["public"]["Enums"]["bank_account_type"] | null
+          bank_code?: string | null
+          bank_name?: string | null
+          company_id?: string | null
+          created_at?: string | null
+          holder_name?: string | null
+          id?: string | null
+          is_default?: boolean | null
+          masked_account?: never
+          masked_branch?: never
+          masked_holder_document?: never
+          status?: Database["public"]["Enums"]["bank_account_status"] | null
+          updated_at?: string | null
+          version?: number | null
+        }
+        Update: {
+          account_type?: Database["public"]["Enums"]["bank_account_type"] | null
+          bank_code?: string | null
+          bank_name?: string | null
+          company_id?: string | null
+          created_at?: string | null
+          holder_name?: string | null
+          id?: string | null
+          is_default?: boolean | null
+          masked_account?: never
+          masked_branch?: never
+          masked_holder_document?: never
+          status?: Database["public"]["Enums"]["bank_account_status"] | null
+          updated_at?: string | null
+          version?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_bank_accounts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      company_settings_safe: {
+        Row: {
+          address_city: string | null
+          address_complement: string | null
+          address_neighborhood: string | null
+          address_number: string | null
+          address_postal_code: string | null
+          address_state: string | null
+          address_street: string | null
+          company_id: string | null
+          consolidated_address: string | null
+          letterhead_file_id: string | null
+          masked_representative_document: string | null
+          representative_name: string | null
+          representative_role: string | null
+          signature_file_id: string | null
+          tax_rate: number | null
+          updated_at: string | null
+          version: number | null
+        }
+        Insert: {
+          address_city?: string | null
+          address_complement?: string | null
+          address_neighborhood?: string | null
+          address_number?: string | null
+          address_postal_code?: string | null
+          address_state?: string | null
+          address_street?: string | null
+          company_id?: string | null
+          consolidated_address?: string | null
+          letterhead_file_id?: string | null
+          masked_representative_document?: never
+          representative_name?: string | null
+          representative_role?: string | null
+          signature_file_id?: string | null
+          tax_rate?: number | null
+          updated_at?: string | null
+          version?: number | null
+        }
+        Update: {
+          address_city?: string | null
+          address_complement?: string | null
+          address_neighborhood?: string | null
+          address_number?: string | null
+          address_postal_code?: string | null
+          address_state?: string | null
+          address_street?: string | null
+          company_id?: string | null
+          consolidated_address?: string | null
+          letterhead_file_id?: string | null
+          masked_representative_document?: never
+          representative_name?: string | null
+          representative_role?: string | null
+          signature_file_id?: string | null
+          tax_rate?: number | null
+          updated_at?: string | null
+          version?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_settings_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_settings_company_id_letterhead_file_id_fkey"
+            columns: ["company_id", "letterhead_file_id"]
+            isOneToOne: false
+            referencedRelation: "file_objects"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "company_settings_company_id_signature_file_id_fkey"
+            columns: ["company_id", "signature_file_id"]
+            isOneToOne: false
+            referencedRelation: "file_objects"
+            referencedColumns: ["company_id", "id"]
+          },
+        ]
+      }
     }
     Functions: {
       issue_password_recovery_grant: {
@@ -448,13 +1117,42 @@ export type Database = {
     Enums: {
       audit_outcome: "success" | "denied" | "failure"
       audit_scope: "platform" | "tenant"
+      bank_account_status: "active" | "archived"
+      bank_account_type: "checking" | "savings" | "payment"
       company_status: "active" | "archived"
+      file_purpose:
+        | "profile_avatar"
+        | "company_letterhead"
+        | "company_signature"
+        | "contract_attachment"
+        | "payment_invoice"
+        | "certificate"
+        | "generated_document"
+      file_scan_status: "pending" | "clean" | "infected" | "failed"
+      file_status: "ready" | "rejected" | "archived"
       idempotency_state: "processing" | "completed" | "failed"
       membership_role: "company_admin" | "member"
       membership_status: "active" | "suspended"
       module_key: "administrative" | "financial" | "certificates"
       platform_role: "super_admin"
+      provisioning_kind: "company_first_admin" | "company_member"
+      provisioning_status:
+        | "reserved"
+        | "auth_created"
+        | "committed"
+        | "compensated"
+        | "compensation_required"
+        | "failed"
       theme_preference: "dark" | "light"
+      upload_intent_status:
+        | "reserved"
+        | "issued"
+        | "finalizing"
+        | "ready"
+        | "rejected"
+        | "expired"
+        | "cancelled"
+        | "cleanup_required"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -584,13 +1282,45 @@ export const Constants = {
     Enums: {
       audit_outcome: ["success", "denied", "failure"],
       audit_scope: ["platform", "tenant"],
+      bank_account_status: ["active", "archived"],
+      bank_account_type: ["checking", "savings", "payment"],
       company_status: ["active", "archived"],
+      file_purpose: [
+        "profile_avatar",
+        "company_letterhead",
+        "company_signature",
+        "contract_attachment",
+        "payment_invoice",
+        "certificate",
+        "generated_document",
+      ],
+      file_scan_status: ["pending", "clean", "infected", "failed"],
+      file_status: ["ready", "rejected", "archived"],
       idempotency_state: ["processing", "completed", "failed"],
       membership_role: ["company_admin", "member"],
       membership_status: ["active", "suspended"],
       module_key: ["administrative", "financial", "certificates"],
       platform_role: ["super_admin"],
+      provisioning_kind: ["company_first_admin", "company_member"],
+      provisioning_status: [
+        "reserved",
+        "auth_created",
+        "committed",
+        "compensated",
+        "compensation_required",
+        "failed",
+      ],
       theme_preference: ["dark", "light"],
+      upload_intent_status: [
+        "reserved",
+        "issued",
+        "finalizing",
+        "ready",
+        "rejected",
+        "expired",
+        "cancelled",
+        "cleanup_required",
+      ],
     },
   },
 } as const

@@ -336,6 +336,10 @@ async function cleanupFixtures(): Promise<void> {
         where user_id = any(${userIds}::uuid[])
       `
       await transaction`
+        delete from private.company_storage_usage
+        where company_id = ${companyId}::uuid
+      `
+      await transaction`
         delete from public.companies
         where id = ${companyId}::uuid
       `

@@ -365,6 +365,10 @@ class Task12LocalFixture {
             alter table public.company_memberships enable trigger protect_last_company_admin
           `
           await transaction`
+            delete from private.company_storage_usage
+            where company_id = any(${this.companyIds}::uuid[])
+          `
+          await transaction`
             delete from public.companies where id = any(${this.companyIds}::uuid[])
           `
           await transaction`

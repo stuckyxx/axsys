@@ -523,6 +523,10 @@ async function cleanupSecurityFixtures(sql: Sql): Promise<void> {
         where user_id = any(${ALL_USERS}::uuid[])
       `
       await transaction`
+        delete from private.company_storage_usage
+        where company_id = any(${ALL_COMPANIES}::uuid[])
+      `
+      await transaction`
         delete from public.companies
         where id = any(${ALL_COMPANIES}::uuid[])
       `

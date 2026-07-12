@@ -495,6 +495,10 @@ async function deleteTenantCompany(input: {
       where id = ${input.membershipId}::uuid
     `
     await transaction`
+      delete from private.company_storage_usage
+      where company_id = ${input.companyId}::uuid
+    `
+    await transaction`
       delete from public.companies
       where id = ${input.companyId}::uuid
     `
@@ -668,6 +672,10 @@ async function cleanupFixtures(sql: Sql): Promise<void> {
     await transaction`
       delete from public.company_memberships
       where id = any(${ALL_MEMBERSHIPS}::uuid[])
+    `
+    await transaction`
+      delete from private.company_storage_usage
+      where company_id = any(${ALL_COMPANIES}::uuid[])
     `
     await transaction`
       delete from public.companies

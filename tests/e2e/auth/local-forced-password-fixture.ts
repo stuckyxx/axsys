@@ -234,6 +234,10 @@ class ForcedPasswordIdentityFixture {
             where id = ${this.membershipId}::uuid
           `
           await transaction`
+            delete from private.company_storage_usage
+            where company_id = ${this.companyId}::uuid
+          `
+          await transaction`
             delete from public.companies where id = ${this.companyId}::uuid
           `
           await transaction`

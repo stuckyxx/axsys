@@ -363,6 +363,10 @@ export class Task11LocalFixture {
           }
           if (this.companyId !== "") {
             await transaction`
+              delete from private.company_storage_usage
+              where company_id = ${this.companyId}::uuid
+            `
+            await transaction`
               delete from public.companies
               where id = ${this.companyId}::uuid
             `
@@ -390,6 +394,8 @@ export class Task11LocalFixture {
                where membership_id = nullif(${this.membershipId}, '')::uuid)
             + (select count(*) from public.companies
                where id = nullif(${this.companyId}, '')::uuid)
+            + (select count(*) from private.company_storage_usage
+               where company_id = nullif(${this.companyId}, '')::uuid)
             + (select count(*) from private.auth_session_controls where user_id = ${this.userId}::uuid)
             + (select count(*) from private.auth_user_session_cutoffs where user_id = ${this.userId}::uuid)
             + (select count(*) from public.audit_events

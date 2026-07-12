@@ -61,7 +61,7 @@ select results_eq(
     ('company_memberships','id,company_id,user_id,role,status,created_by,suspended_at,suspended_by,suspension_reason,version,created_at,updated_at'),
     ('member_modules','company_id,membership_id,module,granted_by,created_at'),
     ('platform_roles','user_id,role,is_active,created_by,created_at'),
-    ('profiles','user_id,email,display_name,preferred_theme,must_change_password,temporary_password_expires_at,password_changed_at,is_active,version,created_at,updated_at')$$,
+    ('profiles','user_id,email,display_name,preferred_theme,must_change_password,temporary_password_expires_at,password_changed_at,is_active,version,created_at,updated_at,avatar_file_id')$$,
   'tabelas base expõem exatamente as colunas contratadas'
 );
 select results_eq(
@@ -98,6 +98,7 @@ select results_eq(
     ('platform_roles','platform_roles_created_by_fkey'),
     ('platform_roles','platform_roles_pkey'),
     ('platform_roles','platform_roles_user_id_fkey'),
+    ('profiles','profiles_avatar_file_id_fkey'),
     ('profiles','profiles_display_name_length'),
     ('profiles','profiles_email_key'),
     ('profiles','profiles_email_normalized'),
@@ -122,7 +123,7 @@ select results_eq(
         'memberships_company_status_idx','memberships_created_by_idx',
         'memberships_suspended_by_idx','memberships_user_status_idx',
         'platform_roles_created_by_idx','platform_roles_pkey',
-        'profiles_email_key','profiles_pkey'
+        'profiles_avatar_file_id_idx','profiles_email_key','profiles_pkey'
       )
     order by indexname$$,
   $$values
@@ -144,6 +145,7 @@ select results_eq(
     ('memberships_user_status_idx'),
     ('platform_roles_created_by_idx'),
     ('platform_roles_pkey'),
+    ('profiles_avatar_file_id_idx'),
     ('profiles_email_key'),
     ('profiles_pkey')$$,
   'índices implícitos e explícitos essenciais existem'
@@ -184,6 +186,7 @@ select results_eq(
       and class.relname in ('profiles','platform_roles','companies','company_memberships','member_modules')
     order by class.relname, trigger.tgname$$,
   $$values
+    ('companies','companies_initialize_storage_usage','initialize_company_storage_usage','O'),
     ('companies','companies_serialize_auth_scope','serialize_identity_invariants','O'),
     ('companies','companies_touch_version','touch_version','O'),
     ('company_memberships','company_memberships_serialize_identity_invariants','serialize_identity_invariants','O'),
@@ -204,6 +207,7 @@ select results_eq(
     from pg_trigger trigger
     join pg_class class on class.oid = trigger.tgrelid
     where trigger.tgname in (
+        'companies_initialize_storage_usage',
         'companies_serialize_auth_scope',
         'company_memberships_serialize_identity_invariants',
         'platform_roles_serialize_identity_invariants',
@@ -212,6 +216,8 @@ select results_eq(
       and not trigger.tgisinternal
     order by class.relname, trigger.tgname$$,
   $$values
+    ('companies','companies_initialize_storage_usage',5,
+     'CREATE TRIGGER companies_initialize_storage_usage AFTER INSERT ON public.companies FOR EACH ROW EXECUTE FUNCTION private.initialize_company_storage_usage()'),
     ('companies','companies_serialize_auth_scope',18,
      'CREATE TRIGGER companies_serialize_auth_scope BEFORE UPDATE OF status ON public.companies FOR EACH STATEMENT EXECUTE FUNCTION private.serialize_identity_invariants()'),
     ('company_memberships','company_memberships_serialize_identity_invariants',30,
@@ -220,7 +226,7 @@ select results_eq(
      'CREATE TRIGGER platform_roles_serialize_identity_invariants BEFORE INSERT OR DELETE OR UPDATE OF user_id, is_active ON public.platform_roles FOR EACH STATEMENT EXECUTE FUNCTION private.serialize_identity_invariants()'),
     ('profiles','profiles_serialize_auth_scope',18,
      'CREATE TRIGGER profiles_serialize_auth_scope BEFORE UPDATE OF must_change_password, temporary_password_expires_at, is_active ON public.profiles FOR EACH STATEMENT EXECUTE FUNCTION private.serialize_identity_invariants()')$$,
-  'serialização global cobre exatamente os eventos statement-level contratados'
+  'triggers críticos congelam inicialização de cota e serialização statement-level'
 );
 select is(
   (
@@ -246,6 +252,7 @@ select results_eq(
     where namespace.nspname = 'private'
       and function.proname in (
         'enforce_identity_exclusivity',
+        'initialize_company_storage_usage',
         'protect_last_company_admin',
         'serialize_identity_invariants',
         'touch_version'
@@ -253,10 +260,11 @@ select results_eq(
     order by function.proname$$,
   $$values
     ('enforce_identity_exclusivity','postgres','plpgsql','f',false),
+    ('initialize_company_storage_usage','postgres','plpgsql','f',true),
     ('protect_last_company_admin','postgres','plpgsql','f',false),
     ('serialize_identity_invariants','postgres','plpgsql','f',false),
     ('touch_version','postgres','plpgsql','f',false)$$,
-  'funções privadas são functions de postgres e SECURITY INVOKER'
+  'funções privadas congelam owner, kind e modo SECURITY contratado'
 );
 select is_empty(
   $$select function.oid::regprocedure::text
@@ -265,6 +273,7 @@ select is_empty(
     where namespace.nspname = 'private'
       and function.proname in (
         'enforce_identity_exclusivity',
+        'initialize_company_storage_usage',
         'protect_last_company_admin',
         'serialize_identity_invariants',
         'touch_version'
