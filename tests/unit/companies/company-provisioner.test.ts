@@ -100,4 +100,22 @@ describe("company provisioner", () => {
       "AUTH_DELETE_FAILED",
     )
   })
+
+  it("rejects weak provisional passwords before reserving the saga", async () => {
+    const deps = fixture()
+    await expect(
+      provisionCompany(
+        { ...deps, fingerprint: vi.fn(() => "d".repeat(64)) },
+        {
+          ...command,
+          input: {
+            ...input,
+            firstAdmin: { ...input.firstAdmin, temporaryPassword: "curta" },
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ code: "PASSWORD_WEAK" })
+    expect(deps.repository.reserve).not.toHaveBeenCalled()
+    expect(deps.auth.createUser).not.toHaveBeenCalled()
+  })
 })

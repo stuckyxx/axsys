@@ -5,6 +5,7 @@ import {
   createCompanySchema,
   type CreateCompanyInput,
 } from "@/modules/companies/schemas/company-schemas"
+import { validatePassword } from "@/modules/auth/server/password-policy"
 
 type ProvisionedCompany = Readonly<{
   company: Readonly<{ id: string; status: "active" }>
@@ -115,6 +116,7 @@ export async function provisionCompany(
   }>,
 ): Promise<ProvisionedCompany> {
   const input = createCompanySchema.parse(command.input)
+  await validatePassword(input.firstAdmin.temporaryPassword)
   const operation = await deps.repository.reserve({
     actorUserId: command.actorUserId,
     idempotencyKeyHash: deps.fingerprint(
