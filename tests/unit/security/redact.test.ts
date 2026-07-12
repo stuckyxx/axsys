@@ -40,6 +40,17 @@ describe("security redaction", () => {
     expect(redaction.hashSensitive("account-1")).toMatch(/^[0-9a-f]{64}$/u)
   })
 
+  it("fingerprints case- and whitespace-sensitive secrets with domain separation", async () => {
+    stubServerEnv()
+    const { fingerprintSensitiveExact } = await import("@/lib/security/redact")
+
+    const base = fingerprintSensitiveExact("company-password", "Senha Segura")
+    expect(base).toMatch(/^[0-9a-f]{64}$/u)
+    expect(fingerprintSensitiveExact("company-password", "senha Segura")).not.toBe(base)
+    expect(fingerprintSensitiveExact("company-password", "Senha Segura ")).not.toBe(base)
+    expect(fingerprintSensitiveExact("company-email", "Senha Segura")).not.toBe(base)
+  })
+
   it("redacts nested case-insensitive sensitive keys and array entries", async () => {
     stubServerEnv()
     const { redactRecord } = await import("@/lib/security/redact")

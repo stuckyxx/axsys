@@ -29,6 +29,18 @@ export function hashSensitive(value: string): string {
     .digest("hex")
 }
 
+export function fingerprintSensitiveExact(
+  purpose: string,
+  value: string,
+): string {
+  if (!/^[a-z][a-z0-9-]{2,63}$/u.test(purpose) || value.length === 0) {
+    throw new Error("Invalid sensitive fingerprint input")
+  }
+  return createHmac("sha256", getServerEnv().SECURITY_HASH_PEPPER)
+    .update(`${purpose.length}:${purpose}${value.length}:${value}`, "utf8")
+    .digest("hex")
+}
+
 function truncateString(value: string): string {
   const characters = Array.from(value)
   return characters.length > MAX_STRING
