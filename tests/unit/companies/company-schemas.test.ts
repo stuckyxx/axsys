@@ -21,6 +21,32 @@ const valid = {
 }
 
 describe("company schemas", () => {
+  it("matches the persisted legal and trade name length boundaries", () => {
+    const base = {
+      legalName: "L".repeat(160),
+      tradeName: "T".repeat(180),
+      cnpj: "11222333000181",
+      contactEmail: "contato@example.com",
+      contactPhone: null,
+      timezone: "America/Fortaleza",
+      firstAdmin: {
+        displayName: "Maria Administradora",
+        email: "maria@example.com",
+        temporaryPassword: "frase provisoria segura 2026",
+        modules: [],
+      },
+    }
+
+    expect(createCompanySchema.safeParse(base).success).toBe(true)
+    expect(
+      createCompanySchema.safeParse({ ...base, legalName: "L".repeat(161) })
+        .success,
+    ).toBe(false)
+    expect(
+      createCompanySchema.safeParse({ ...base, tradeName: "T".repeat(181) })
+        .success,
+    ).toBe(false)
+  })
   it("normalizes CNPJ, emails, modules and canonical timezone", () => {
     expect(createCompanySchema.parse(valid)).toEqual({
       ...valid,

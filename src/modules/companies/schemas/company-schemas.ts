@@ -73,7 +73,8 @@ const modulesSchema = z
   )
 
 const emailSchema = z.string().trim().toLowerCase().email().max(254)
-const nameSchema = z.string().trim().min(2).max(180)
+const legalNameSchema = z.string().trim().min(2).max(160)
+const tradeNameSchema = z.string().trim().min(2).max(180)
 const phoneSchema = z.preprocess((value) => {
   if (typeof value !== "string") return value
   const trimmed = value.trim()
@@ -82,8 +83,8 @@ const phoneSchema = z.preprocess((value) => {
 
 export const createCompanySchema = z
   .object({
-    legalName: nameSchema,
-    tradeName: nameSchema,
+    legalName: legalNameSchema,
+    tradeName: tradeNameSchema,
     cnpj: cnpjSchema,
     contactEmail: emailSchema,
     contactPhone: phoneSchema,
@@ -101,8 +102,8 @@ export const createCompanySchema = z
 
 export const updateCompanySchema = z
   .object({
-    legalName: nameSchema,
-    tradeName: nameSchema,
+    legalName: legalNameSchema,
+    tradeName: tradeNameSchema,
     contactEmail: emailSchema,
     contactPhone: phoneSchema,
     timezone: timezoneSchema,
