@@ -60,6 +60,16 @@ export function CompanyCreateForm() {
     if (pending) return
     const form = event.currentTarget
     const values = new FormData(form)
+    const temporaryPassword = values.get("temporaryPassword")
+    const passwordConfirmation = values.get("passwordConfirmation")
+    if (
+      typeof temporaryPassword !== "string" ||
+      temporaryPassword !== passwordConfirmation
+    ) {
+      setMessage(null)
+      setError("A confirmação da senha provisória não confere.")
+      return
+    }
     const controller = new AbortController()
     request.current?.abort()
     request.current = controller
@@ -91,7 +101,7 @@ export function CompanyCreateForm() {
           firstAdmin: {
             displayName: values.get("adminDisplayName"),
             email: values.get("adminEmail"),
-            temporaryPassword: values.get("temporaryPassword"),
+            temporaryPassword,
             modules: values.getAll("modules"),
           },
         }),
@@ -181,6 +191,10 @@ export function CompanyCreateForm() {
             <Label htmlFor="admin-temporary-password">Senha provisória</Label>
             <Input id="admin-temporary-password" name="temporaryPassword" type="password" autoComplete="new-password" required minLength={12} maxLength={128} />
             <p className="text-xs text-muted-foreground">Use ao menos 12 caracteres. A senha não é armazenada no banco nem em logs.</p>
+          </div>
+          <div className="space-y-2 md:col-span-2">
+            <Label htmlFor="admin-password-confirmation">Confirme a senha provisória</Label>
+            <Input id="admin-password-confirmation" name="passwordConfirmation" type="password" autoComplete="new-password" required minLength={12} maxLength={128} />
           </div>
           <div className="space-y-3 md:col-span-2">
             <span className="text-sm font-medium">Módulos iniciais</span>
