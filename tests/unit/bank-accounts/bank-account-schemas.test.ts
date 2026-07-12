@@ -40,4 +40,10 @@ describe("bank account schemas", () => {
       }),
     ).toThrow()
   })
+
+  it("rejects letters instead of silently stripping arbitrary input", () => {
+    expect(() =>
+      createBankAccountSchema.parse({ ...valid, bankCode: "abc001xyz" }),
+    ).toThrow()
+  })
 })

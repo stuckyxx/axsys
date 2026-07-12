@@ -7,6 +7,7 @@ import {
   encryptBankAccount,
   maskBankSummary,
 } from "@/modules/bank-accounts/server/bank-account-crypto"
+import { BANK_ACCOUNT_CRYPTO_V1_FIXTURE } from "../../fixtures/bank-account-crypto-v1"
 
 const keyring = { currentVersion: 1, keys: new Map([[1, randomBytes(32)]]) }
 
@@ -85,6 +86,27 @@ describe("bank account encryption", () => {
     ).toThrow("Bank encryption key unavailable")
   })
 
+  it("decrypts the stable V1 fixture after rotating current writes to V2", () => {
+    const fixture = BANK_ACCOUNT_CRYPTO_V1_FIXTURE
+    const rotatedKeyring = {
+      currentVersion: 2,
+      keys: new Map([
+        [1, Buffer.from(fixture.keyBase64, "base64")],
+        [2, randomBytes(32)],
+      ]),
+    }
+
+    expect(
+      decryptBankField(
+        fixture.account,
+        rotatedKeyring,
+        fixture.companyId,
+        fixture.bankAccountId,
+        "account",
+      ),
+    ).toBe(fixture.plaintextAccount)
+  })
+
   it("rejects ambiguous non-UUID encryption scopes", () => {
     expect(() =>
       encryptBankAccount(
@@ -98,5 +120,24 @@ describe("bank account encryption", () => {
         keyring,
       ),
     ).toThrow("Invalid bank encryption scope")
+  })
+
+  it("rejects invalid field characters and field-specific lengths", () => {
+    const base = {
+      companyId: crypto.randomUUID(),
+      bankAccountId: crypto.randomUUID(),
+      branch: "1234",
+      account: "987654",
+      holderDocument: null,
+    }
+    expect(() =>
+      encryptBankAccount({ ...base, branch: "abc1234" }, keyring),
+    ).toThrow("Invalid branch")
+    expect(() =>
+      encryptBankAccount({ ...base, branch: "1".repeat(17) }, keyring),
+    ).toThrow("Invalid branch")
+    expect(() =>
+      encryptBankAccount({ ...base, holderDocument: "123" }, keyring),
+    ).toThrow("Invalid holder document")
   })
 })

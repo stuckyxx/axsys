@@ -3,6 +3,8 @@ import { z } from "@/lib/validation/zod"
 const digitsSchema = (minimum: number, maximum: number) =>
   z
     .string()
+    .trim()
+    .regex(/^[0-9.\-/\s]+$/u)
     .transform((value) => value.replace(/\D/gu, ""))
     .pipe(z.string().min(minimum).max(maximum))
 

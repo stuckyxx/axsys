@@ -42,9 +42,15 @@ function keyFor(keyring: BankKeyring, version: number): Buffer {
   return key
 }
 
-function normalizeDigits(value: string, label: string): string {
+function normalizeDigits(
+  value: string,
+  label: string,
+  minimum: number,
+  maximum: number,
+): string {
+  if (!/^[0-9.\-/\s]+$/u.test(value)) throw new Error(`Invalid ${label}`)
   const normalized = value.replace(/\D/gu, "")
-  if (normalized.length === 0 || normalized.length > 32) {
+  if (normalized.length < minimum || normalized.length > maximum) {
     throw new Error(`Invalid ${label}`)
   }
   return normalized
@@ -75,12 +81,12 @@ export function encryptBankAccount(
   if (!UUID.test(input.companyId) || !UUID.test(input.bankAccountId)) {
     throw new Error("Invalid bank encryption scope")
   }
-  const branch = normalizeDigits(input.branch, "branch")
-  const account = normalizeDigits(input.account, "account")
+  const branch = normalizeDigits(input.branch, "branch", 1, 16)
+  const account = normalizeDigits(input.account, "account", 1, 32)
   const holderDocument =
     input.holderDocument === null
       ? null
-      : normalizeDigits(input.holderDocument, "holder document")
+      : normalizeDigits(input.holderDocument, "holder document", 11, 14)
   const version = keyring.currentVersion
   const key = keyFor(keyring, version)
   return {
