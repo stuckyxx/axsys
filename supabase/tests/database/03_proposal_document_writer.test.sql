@@ -1,0 +1,32 @@
+begin;
+select plan(26);
+
+select has_function('private','store_proposal_document',array['uuid','uuid','uuid','text','text','bigint','text','jsonb','text','uuid'],'store writer exact signature');
+select has_function('private','authorize_proposal_document_download',array['uuid','uuid','uuid','uuid'],'download authorizer exact signature');
+select ok(to_regprocedure('public.store_proposal_document(uuid,uuid,uuid,text,text,bigint,text,jsonb,text,uuid)') is null,'no public store writer');
+select ok(to_regprocedure('public.authorize_proposal_document_download(uuid,uuid,uuid,uuid)') is null,'no public download authorizer');
+select function_returns('private','store_proposal_document',array['uuid','uuid','uuid','text','text','bigint','text','jsonb','text','uuid'],'jsonb','store returns jsonb envelope');
+select function_returns('private','authorize_proposal_document_download',array['uuid','uuid','uuid','uuid'],'jsonb','download returns jsonb envelope');
+select ok((select prosecdef and proconfig @> array['search_path=""'] from pg_proc where oid=to_regprocedure('private.store_proposal_document(uuid,uuid,uuid,text,text,bigint,text,jsonb,text,uuid)')),'store is fixed-search-path definer');
+select ok((select prosecdef and proconfig @> array['search_path=""'] from pg_proc where oid=to_regprocedure('private.authorize_proposal_document_download(uuid,uuid,uuid,uuid)')),'download is fixed-search-path definer');
+select ok(has_function_privilege('axsys_bff','private.store_proposal_document(uuid,uuid,uuid,text,text,bigint,text,jsonb,text,uuid)','execute'),'BFF can store');
+select ok(has_function_privilege('axsys_bff','private.authorize_proposal_document_download(uuid,uuid,uuid,uuid)','execute'),'BFF can authorize download');
+select ok(not has_function_privilege('authenticated','private.store_proposal_document(uuid,uuid,uuid,text,text,bigint,text,jsonb,text,uuid)','execute'),'authenticated cannot store');
+select ok(not has_function_privilege('service_role','private.store_proposal_document(uuid,uuid,uuid,text,text,bigint,text,jsonb,text,uuid)','execute'),'service role cannot store');
+select ok(not has_function_privilege('authenticated','private.authorize_proposal_document_download(uuid,uuid,uuid,uuid)','execute'),'authenticated cannot authorize download');
+select ok(not has_function_privilege('service_role','private.authorize_proposal_document_download(uuid,uuid,uuid,uuid)','execute'),'service role cannot authorize download');
+select ok((select pg_get_functiondef(to_regprocedure('private.store_proposal_document(uuid,uuid,uuid,text,text,bigint,text,jsonb,text,uuid)')) like '%company_storage_usage%'),'store enforces quota atomically');
+select ok((select pg_get_functiondef(to_regprocedure('private.store_proposal_document(uuid,uuid,uuid,text,text,bigint,text,jsonb,text,uuid)')) like '%generated_documents%'),'store persists immutable document metadata');
+select ok((select pg_get_functiondef(to_regprocedure('private.authorize_proposal_document_download(uuid,uuid,uuid,uuid)')) like '%begin_download_audit_core%'),'download reuses audited core');
+select ok((select pg_get_functiondef(to_regprocedure('private.authorize_proposal_document_download(uuid,uuid,uuid,uuid)')) not like '%immutable_snapshot%'),'download never exposes snapshot');
+select has_table('private','generated_document_orphan_cleanup','durable orphan cleanup queue exists');
+select has_function('private','record_generated_document_orphan_cleanup',array['uuid','uuid','uuid','text','text','uuid'],'orphan recorder exact signature');
+select function_returns('private','record_generated_document_orphan_cleanup',array['uuid','uuid','uuid','text','text','uuid'],'jsonb','orphan recorder returns allowlisted jsonb');
+select ok((select prosecdef and proconfig @> array['search_path=""'] from pg_proc where oid=to_regprocedure('private.record_generated_document_orphan_cleanup(uuid,uuid,uuid,text,text,uuid)')),'orphan recorder is fixed-search-path definer');
+select ok(has_function_privilege('axsys_bff','private.record_generated_document_orphan_cleanup(uuid,uuid,uuid,text,text,uuid)','execute'),'BFF can record orphan cleanup');
+select ok(not has_function_privilege('authenticated','private.record_generated_document_orphan_cleanup(uuid,uuid,uuid,text,text,uuid)','execute'),'authenticated cannot record orphan cleanup');
+select ok(not has_function_privilege('service_role','private.record_generated_document_orphan_cleanup(uuid,uuid,uuid,text,text,uuid)','execute'),'service role cannot record orphan cleanup');
+select ok(not has_table_privilege('axsys_bff','private.generated_document_orphan_cleanup','select'),'raw orphan paths remain private');
+
+select * from finish();
+rollback;
