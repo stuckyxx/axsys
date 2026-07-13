@@ -75,6 +75,145 @@ export type Database = {
           },
         ]
       }
+      catalog_items: {
+        Row: {
+          archived_at: string | null
+          archived_by: string | null
+          company_id: string
+          created_at: string
+          created_by: string
+          description: string
+          id: string
+          item_kind: Database["public"]["Enums"]["catalog_item_kind"]
+          name: string
+          segment: string
+          updated_at: string
+          updated_by: string
+          version: number
+        }
+        Insert: {
+          archived_at?: string | null
+          archived_by?: string | null
+          company_id: string
+          created_at?: string
+          created_by: string
+          description: string
+          id?: string
+          item_kind: Database["public"]["Enums"]["catalog_item_kind"]
+          name: string
+          segment: string
+          updated_at?: string
+          updated_by: string
+          version?: number
+        }
+        Update: {
+          archived_at?: string | null
+          archived_by?: string | null
+          company_id?: string
+          created_at?: string
+          created_by?: string
+          description?: string
+          id?: string
+          item_kind?: Database["public"]["Enums"]["catalog_item_kind"]
+          name?: string
+          segment?: string
+          updated_at?: string
+          updated_by?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "catalog_items_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      clients: {
+        Row: {
+          address_complement: string | null
+          address_neighborhood: string | null
+          address_number: string | null
+          address_street: string | null
+          archived_at: string | null
+          archived_by: string | null
+          cnpj_normalized: string
+          company_id: string
+          created_at: string
+          created_by: string
+          email: string | null
+          id: string
+          legal_name: string
+          municipality: string
+          phone: string | null
+          postal_code: string | null
+          segment: string
+          state: string
+          trade_name: string | null
+          updated_at: string
+          updated_by: string
+          version: number
+        }
+        Insert: {
+          address_complement?: string | null
+          address_neighborhood?: string | null
+          address_number?: string | null
+          address_street?: string | null
+          archived_at?: string | null
+          archived_by?: string | null
+          cnpj_normalized: string
+          company_id: string
+          created_at?: string
+          created_by: string
+          email?: string | null
+          id?: string
+          legal_name: string
+          municipality: string
+          phone?: string | null
+          postal_code?: string | null
+          segment: string
+          state: string
+          trade_name?: string | null
+          updated_at?: string
+          updated_by: string
+          version?: number
+        }
+        Update: {
+          address_complement?: string | null
+          address_neighborhood?: string | null
+          address_number?: string | null
+          address_street?: string | null
+          archived_at?: string | null
+          archived_by?: string | null
+          cnpj_normalized?: string
+          company_id?: string
+          created_at?: string
+          created_by?: string
+          email?: string | null
+          id?: string
+          legal_name?: string
+          municipality?: string
+          phone?: string | null
+          postal_code?: string | null
+          segment?: string
+          state?: string
+          trade_name?: string | null
+          updated_at?: string
+          updated_by?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clients_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       companies: {
         Row: {
           archived_at: string | null
@@ -1154,6 +1293,7 @@ export type Database = {
       audit_scope: "platform" | "tenant"
       bank_account_status: "active" | "archived"
       bank_account_type: "checking" | "savings" | "payment"
+      catalog_item_kind: "service" | "product"
       company_status: "active" | "archived"
       file_purpose:
         | "profile_avatar"
@@ -1170,6 +1310,7 @@ export type Database = {
       membership_status: "active" | "suspended"
       module_key: "administrative" | "financial" | "certificates"
       platform_role: "super_admin"
+      proposal_status: "draft" | "sent" | "approved" | "rejected"
       provisioning_kind: "company_first_admin" | "company_member"
       provisioning_status:
         | "reserved"
@@ -1319,6 +1460,7 @@ export const Constants = {
       audit_scope: ["platform", "tenant"],
       bank_account_status: ["active", "archived"],
       bank_account_type: ["checking", "savings", "payment"],
+      catalog_item_kind: ["service", "product"],
       company_status: ["active", "archived"],
       file_purpose: [
         "profile_avatar",
@@ -1336,6 +1478,7 @@ export const Constants = {
       membership_status: ["active", "suspended"],
       module_key: ["administrative", "financial", "certificates"],
       platform_role: ["super_admin"],
+      proposal_status: ["draft", "sent", "approved", "rejected"],
       provisioning_kind: ["company_first_admin", "company_member"],
       provisioning_status: [
         "reserved",
