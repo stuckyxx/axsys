@@ -993,6 +993,145 @@ export type Database = {
           },
         ]
       }
+      proposal_items: {
+        Row: {
+          catalog_item_id: string
+          company_id: string
+          created_at: string
+          description_snapshot: string
+          id: string
+          item_kind: Database["public"]["Enums"]["catalog_item_kind"]
+          line_total: number | null
+          monthly_amount: number | null
+          months: number | null
+          position: number
+          proposal_id: string
+          quantity: number | null
+          segment: string
+          unit_amount: number | null
+        }
+        Insert: {
+          catalog_item_id: string
+          company_id: string
+          created_at?: string
+          description_snapshot: string
+          id?: string
+          item_kind: Database["public"]["Enums"]["catalog_item_kind"]
+          line_total?: number | null
+          monthly_amount?: number | null
+          months?: number | null
+          position: number
+          proposal_id: string
+          quantity?: number | null
+          segment: string
+          unit_amount?: number | null
+        }
+        Update: {
+          catalog_item_id?: string
+          company_id?: string
+          created_at?: string
+          description_snapshot?: string
+          id?: string
+          item_kind?: Database["public"]["Enums"]["catalog_item_kind"]
+          line_total?: number | null
+          monthly_amount?: number | null
+          months?: number | null
+          position?: number
+          proposal_id?: string
+          quantity?: number | null
+          segment?: string
+          unit_amount?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "proposal_items_catalog_segment_kind_fk"
+            columns: ["company_id", "catalog_item_id", "segment", "item_kind"]
+            isOneToOne: false
+            referencedRelation: "catalog_items"
+            referencedColumns: ["company_id", "id", "segment", "item_kind"]
+          },
+          {
+            foreignKeyName: "proposal_items_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proposal_items_proposal_segment_fk"
+            columns: ["company_id", "proposal_id", "segment"]
+            isOneToOne: false
+            referencedRelation: "proposals"
+            referencedColumns: ["company_id", "id", "segment"]
+          },
+        ]
+      }
+      proposals: {
+        Row: {
+          client_id: string
+          company_id: string
+          created_at: string
+          created_by: string
+          id: string
+          issued_on: string
+          number: number
+          segment: string
+          sent_at: string | null
+          status: Database["public"]["Enums"]["proposal_status"]
+          total: number
+          updated_at: string
+          updated_by: string
+          version: number
+        }
+        Insert: {
+          client_id: string
+          company_id: string
+          created_at?: string
+          created_by: string
+          id?: string
+          issued_on: string
+          number: number
+          segment: string
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["proposal_status"]
+          total?: number
+          updated_at?: string
+          updated_by: string
+          version?: number
+        }
+        Update: {
+          client_id?: string
+          company_id?: string
+          created_at?: string
+          created_by?: string
+          id?: string
+          issued_on?: string
+          number?: number
+          segment?: string
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["proposal_status"]
+          total?: number
+          updated_at?: string
+          updated_by?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "proposals_client_segment_fk"
+            columns: ["company_id", "client_id", "segment"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["company_id", "id", "segment"]
+          },
+          {
+            foreignKeyName: "proposals_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       provisioning_operations: {
         Row: {
           actor_user_id: string

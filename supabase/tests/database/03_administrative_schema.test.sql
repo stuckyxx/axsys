@@ -1,5 +1,5 @@
 begin;
-select plan(20);
+select plan(32);
 select has_table('public','clients','clients exists');
 select has_table('public','catalog_items','catalog_items exists');
 select has_column('public','clients','company_id','clients carries tenant');
@@ -23,5 +23,21 @@ select has_index('public','clients','clients_company_search_idx','client search 
 select has_index('public','clients','clients_company_active_idx','active clients are indexed');
 select has_index('public','catalog_items','catalog_items_company_filter_idx','catalog filters are indexed');
 select has_index('public','catalog_items','catalog_items_active_name_uidx','active catalog names are unique');
+select has_table('public','proposals','proposals exists');
+select has_table('public','proposal_items','proposal_items exists');
+select has_column('public','proposals','client_id','proposal carries client');
+select has_column('public','proposal_items','catalog_item_id','proposal item carries catalog item');
+select col_type_is('public','proposals','total','numeric(14,2)','proposal total is exact');
+select col_type_is('public','proposal_items','line_total','numeric(14,2)','line total is exact');
+select ok(exists(select 1 from pg_constraint where conname='proposals_company_number_key'
+ and conrelid='public.proposals'::regclass),'proposal number is tenant unique');
+select ok(exists(select 1 from pg_constraint where conname='proposals_client_segment_fk'
+ and conrelid='public.proposals'::regclass),'proposal client and segment are tenant bound');
+select ok(exists(select 1 from pg_constraint where conname='proposal_items_proposal_segment_fk'
+ and conrelid='public.proposal_items'::regclass),'proposal item is tenant bound to proposal');
+select ok(exists(select 1 from pg_constraint where conname='proposal_items_catalog_segment_kind_fk'
+ and conrelid='public.proposal_items'::regclass),'proposal item catalog snapshot is tenant bound');
+select has_index('public','proposals','proposals_company_status_idx','proposal status cursor is indexed');
+select has_index('public','proposal_items','proposal_items_proposal_idx','proposal items are indexed');
 select * from finish();
 rollback;
