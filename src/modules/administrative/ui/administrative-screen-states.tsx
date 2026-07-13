@@ -57,13 +57,17 @@ export function AdministrativeNoResultsState({ onClear }: Readonly<{ onClear: ()
   )
 }
 
-export function AdministrativeErrorState({ onRetry }: Readonly<{ onRetry: () => void }>) {
+export function AdministrativeErrorState({
+  description = "A leitura não foi concluída. Nenhuma alteração foi perdida.",
+  onRetry,
+  title = "Não foi possível carregar os clientes",
+}: Readonly<{ description?: string; onRetry: () => void; title?: string }>) {
   return (
     <ActionState
       actionLabel="Tentar novamente"
-      description="A leitura não foi concluída. Nenhuma alteração foi perdida."
+      description={description}
       onAction={onRetry}
-      title="Não foi possível carregar os clientes"
+      title={title}
     />
   )
 }

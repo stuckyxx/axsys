@@ -156,3 +156,188 @@ test("keeps stale local values and presents the current server version", async (
     await second.close()
   }
 })
+
+async function chooseCatalogFilters(
+  page: Page,
+  input: Readonly<{
+    archived?: boolean
+    itemKind?: "product" | "service" | "all"
+    segment?: string
+  }>,
+) {
+  const filterButton = page.locator(
+    'button:visible[aria-label="Filtros do catálogo"]',
+  )
+  const mobile = (await filterButton.count()) > 0
+  if (mobile) await filterButton.click()
+  const scope = mobile
+    ? page.getByRole("dialog", { name: "Filtrar catálogo" })
+    : page.locator('[data-testid="catalog-inline-filters"]')
+  if (input.itemKind) {
+    await scope.getByLabel("Tipo de item").selectOption(input.itemKind)
+  }
+  if (input.segment !== undefined) {
+    await scope.getByLabel("Segmento do catálogo").fill(input.segment)
+  }
+  if (input.archived !== undefined) {
+    const toggle = scope.getByRole("button", {
+      name: input.archived ? "Mostrar arquivados" : "Mostrar ativos",
+    })
+    if (await toggle.isVisible()) await toggle.click()
+  }
+  const apply = scope.getByRole("button", { name: "Aplicar filtros" })
+  if (await apply.isVisible()) await apply.click()
+}
+
+test("manages service and product catalog items responsively", async ({
+  page,
+  companyFixture,
+}) => {
+  test.setTimeout(120_000)
+  await login(page, companyFixture.adminA)
+  await page.goto("/app/administrativo/servicos")
+
+  await expect(
+    page.getByRole("heading", { name: "Serviços e produtos" }),
+  ).toBeVisible()
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true)
+
+  await page.getByRole("button", { name: "Novo item" }).click()
+  let form = page.getByRole("dialog", { name: "Novo item do catálogo" })
+  await form.getByLabel("Serviço").check()
+  await form.getByLabel("Nome").fill("Suporte técnico especializado")
+  await form.getByLabel("Segmento").fill("Tecnologia")
+  await form
+    .getByLabel("Descrição")
+    .fill("Atendimento técnico para ambientes administrativos públicos.")
+  await form.getByRole("button", { name: "Criar item" }).click()
+  await expect(page.getByText("Item criado.")).toBeVisible()
+
+  await page.getByRole("button", { name: "Novo item" }).click()
+  form = page.getByRole("dialog", { name: "Novo item do catálogo" })
+  await form.getByLabel("Produto").check()
+  await form.getByLabel("Nome").fill("Notebook corporativo")
+  await form.getByLabel("Segmento").fill("Equipamentos")
+  await form
+    .getByLabel("Descrição")
+    .fill("Equipamento para uso administrativo com garantia de fábrica.")
+  await form.getByRole("button", { name: "Criar item" }).click()
+  await expect(page.getByText("Item criado.")).toBeVisible()
+
+  await page.getByLabel("Buscar no catálogo").fill("Suporte")
+  await expect(
+    page.locator("*:visible", { hasText: /^Suporte técnico especializado$/u }),
+  ).toBeVisible()
+  await page.getByLabel("Buscar no catálogo").fill("")
+  await chooseCatalogFilters(page, {
+    itemKind: "product",
+    segment: "Equipamentos",
+  })
+  await expect(
+    page.locator("*:visible", { hasText: /^Notebook corporativo$/u }),
+  ).toBeVisible()
+  await expect(
+    page.locator("*:visible", { hasText: /^Suporte técnico especializado$/u }),
+  ).toHaveCount(0)
+
+  await page.locator(
+    'button:visible[aria-label="Editar Notebook corporativo"]',
+  ).click()
+  const edit = page.getByRole("dialog", { name: "Editar item do catálogo" })
+  await edit
+    .getByLabel("Descrição")
+    .fill("Equipamento administrativo atualizado, com garantia estendida.")
+  await edit.getByRole("button", { name: "Salvar alterações" }).click()
+  await expect(page.getByText("Item atualizado.")).toBeVisible()
+
+  await page.locator(
+    'button:visible[aria-label="Arquivar Notebook corporativo"]',
+  ).click()
+  await expect(page.getByText("Item arquivado.")).toBeVisible()
+  await chooseCatalogFilters(page, { archived: true })
+  await page.locator(
+    'button:visible[aria-label="Restaurar Notebook corporativo"]',
+  ).click()
+  await expect(page.getByText("Item restaurado.")).toBeVisible()
+  await chooseCatalogFilters(page, { archived: false })
+  page.once("dialog", (dialog) => void dialog.accept())
+  await page.getByRole("button", {
+    name: "Abrir ações perigosas de Notebook corporativo",
+  }).click()
+  await page.getByRole("menuitem", {
+    name: "Excluir Notebook corporativo",
+  }).click()
+  await expect(page.getByText("Item excluído.")).toBeVisible()
+})
+
+test("preserves a stale catalog edit and compares the current item", async ({
+  context,
+  companyFixture,
+}) => {
+  test.setTimeout(120_000)
+  const first = await context.newPage()
+  const second = await context.newPage()
+  try {
+    await login(first, companyFixture.adminA)
+    await first.goto("/app/administrativo/servicos")
+    await first.getByRole("button", { name: "Novo item" }).click()
+    const create = first.getByRole("dialog", {
+      name: "Novo item do catálogo",
+    })
+    await create.getByLabel("Serviço").check()
+    await create.getByLabel("Nome").fill("Consultoria de conformidade")
+    await create.getByLabel("Segmento").fill("Consultoria")
+    await create
+      .getByLabel("Descrição")
+      .fill("Descrição inicial para o teste de concorrência.")
+    await create.getByRole("button", { name: "Criar item" }).click()
+    await expect(first.getByText("Item criado.")).toBeVisible()
+
+    await second.goto("/app/administrativo/servicos")
+    await expect(
+      second.getByRole("heading", { name: "Serviços e produtos" }),
+    ).toBeVisible()
+    await first.locator(
+      'button:visible[aria-label="Editar Consultoria de conformidade"]',
+    ).click()
+    await second.locator(
+      'button:visible[aria-label="Editar Consultoria de conformidade"]',
+    ).click()
+
+    const firstEdit = first.getByRole("dialog", {
+      name: "Editar item do catálogo",
+    })
+    const secondEdit = second.getByRole("dialog", {
+      name: "Editar item do catálogo",
+    })
+    await secondEdit
+      .getByLabel("Descrição")
+      .fill("Descrição atual gravada pela segunda aba.")
+    await secondEdit.getByRole("button", { name: "Salvar alterações" }).click()
+    await expect(second.getByText("Item atualizado.")).toBeVisible()
+    await firstEdit
+      .getByLabel("Descrição")
+      .fill("Descrição local que deve permanecer no formulário.")
+    await firstEdit.getByRole("button", { name: "Salvar alterações" }).click()
+
+    const comparison = first.getByRole("region", {
+      name: "Conflito de edição do catálogo",
+    })
+    await expect(comparison).toContainText(
+      "Descrição local que deve permanecer no formulário.",
+    )
+    await expect(comparison).toContainText(
+      "Descrição atual gravada pela segunda aba.",
+    )
+    await expect(firstEdit.getByLabel("Descrição")).toHaveValue(
+      "Descrição local que deve permanecer no formulário.",
+    )
+  } finally {
+    await first.close()
+    await second.close()
+  }
+})
