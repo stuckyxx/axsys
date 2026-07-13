@@ -39,6 +39,7 @@ export default defineConfig({
           include: [
             "tests/unit/**/*.{test,spec}.ts",
             "tests/integration/**/*.{test,spec}.{ts,tsx}",
+            "tests/contracts/**/*.{test,spec}.ts",
           ],
           environment: "node",
           setupFiles: [],

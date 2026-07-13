@@ -498,6 +498,38 @@ export class AdversarialLocalFixture {
                or auth_user_id = any(${userIds}::uuid[])
           `
           await transaction`
+            delete from public.generated_documents
+            where company_id = any(${companyIds}::uuid[])
+          `
+          await transaction`
+            delete from public.contract_attachments
+            where company_id = any(${companyIds}::uuid[])
+          `
+          await transaction`
+            delete from public.proposal_items
+            where company_id = any(${companyIds}::uuid[])
+          `
+          await transaction`
+            delete from public.proposals
+            where company_id = any(${companyIds}::uuid[])
+          `
+          await transaction`
+            delete from public.contracts
+            where company_id = any(${companyIds}::uuid[])
+          `
+          await transaction`
+            delete from public.clients
+            where company_id = any(${companyIds}::uuid[])
+          `
+          await transaction`
+            delete from public.catalog_items
+            where company_id = any(${companyIds}::uuid[])
+          `
+          await transaction`
+            delete from private.proposal_number_counters
+            where company_id = any(${companyIds}::uuid[])
+          `
+          await transaction`
             delete from public.member_modules
             where membership_id = any(${membershipIds}::uuid[])
           `
@@ -581,6 +613,22 @@ export class AdversarialLocalFixture {
                where actor_user_id = any(${userIds}::uuid[])
                   or company_id = any(${companyIds}::uuid[])
                   or auth_user_id = any(${userIds}::uuid[]))
+            + (select count(*) from public.generated_documents
+               where company_id = any(${companyIds}::uuid[]))
+            + (select count(*) from public.contract_attachments
+               where company_id = any(${companyIds}::uuid[]))
+            + (select count(*) from public.proposal_items
+               where company_id = any(${companyIds}::uuid[]))
+            + (select count(*) from public.proposals
+               where company_id = any(${companyIds}::uuid[]))
+            + (select count(*) from public.contracts
+               where company_id = any(${companyIds}::uuid[]))
+            + (select count(*) from public.clients
+               where company_id = any(${companyIds}::uuid[]))
+            + (select count(*) from public.catalog_items
+               where company_id = any(${companyIds}::uuid[]))
+            + (select count(*) from private.proposal_number_counters
+               where company_id = any(${companyIds}::uuid[]))
             + (select count(*) from private.auth_password_operations
                where actor_user_id = any(${userIds}::uuid[])
                   or target_user_id = any(${userIds}::uuid[]))

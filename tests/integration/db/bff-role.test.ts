@@ -749,7 +749,7 @@ describe("axsys_bff", () => {
     ])
   })
 
-  it("has EXECUTE on all and only the sixty-four allowlisted boundaries", async () => {
+  it("has EXECUTE on all and only the eighty-four allowlisted boundaries", async () => {
     const routines = await postgresOwnerSql<{ routineName: string }[]>`
       select function.proname as "routineName"
       from pg_proc function
@@ -761,6 +761,8 @@ describe("axsys_bff", () => {
 
     expect(routines.map(({ routineName }) => routineName)).toEqual([
       "activate_file_upload_authorization",
+      "archive_catalog_item",
+      "archive_client",
       "assert_auth_session",
       "authorize_image_file_download",
       "begin_password_recovery",
@@ -769,12 +771,21 @@ describe("axsys_bff", () => {
       "cancel_unissued_file_reservation",
       "claim_upload_authorizations_for_retirement",
       "clear_rate_limit",
+      "close_contract",
       "complete_download_audit",
       "complete_password_recovery",
       "complete_temporary_password_change",
       "complete_temporary_password_reset",
       "complete_upload_authorization_retirement",
       "consume_rate_limit",
+      "create_catalog_item",
+      "create_client",
+      "create_contract",
+      "create_proposal",
+      "delete_catalog_item",
+      "delete_client",
+      "delete_contract",
+      "delete_draft_proposal",
       "fail_closed_login_session",
       "fail_password_recovery",
       "fail_temporary_password_reset",
@@ -820,8 +831,17 @@ describe("axsys_bff", () => {
       "register_auth_session",
       "release_upload_authorization_retirement_claim",
       "reserve_image_upload_intent",
+      "restore_catalog_item",
+      "restore_client",
       "revoke_sessions_and_write_logout",
       "rotate_app_session_after_reauthentication",
+      "save_proposal_items",
+      "transition_proposal_status",
+      "update_catalog_item",
+      "update_client",
+      "update_contract",
+      "update_draft_proposal",
+      "version_contract_attachment",
       "write_authenticated_audit_event",
       "write_security_event",
     ])
