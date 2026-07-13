@@ -27,6 +27,19 @@ describe("contract input", () => {
     expect(() => contractCreateSchema.parse({ ...valid, amount: "1e2" })).toThrow()
   })
 
+  it.each([
+    "clientId",
+    "number",
+    "object",
+    "startsOn",
+    "endsOn",
+    "amount",
+  ] as const)("requires %s", (field) => {
+    const missing = { ...valid }
+    delete missing[field]
+    expect(() => contractCreateSchema.parse(missing)).toThrow()
+  })
+
   it("adds a positive version on update", () => {
     expect(() => contractUpdateSchema.parse({ ...valid, version: 0 })).toThrow()
     expect(contractUpdateSchema.parse({ ...valid, version: 4 }).version).toBe(4)

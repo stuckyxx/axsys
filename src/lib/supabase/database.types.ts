@@ -657,6 +657,13 @@ export type Database = {
             foreignKeyName: "contract_attachments_contract_fk"
             columns: ["company_id", "contract_id"]
             isOneToOne: false
+            referencedRelation: "contract_search_rows"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "contract_attachments_contract_fk"
+            columns: ["company_id", "contract_id"]
+            isOneToOne: false
             referencedRelation: "contracts"
             referencedColumns: ["company_id", "id"]
           },
@@ -1591,6 +1598,45 @@ export type Database = {
           company_id: string | null
           record_count: number | null
           total: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contracts_client_fk"
+            columns: ["company_id", "client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "contracts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contract_search_rows: {
+        Row: {
+          amount: number | null
+          client_id: string | null
+          client_legal_name: string | null
+          client_legal_name_prefix: string | null
+          client_trade_name: string | null
+          client_trade_name_prefix: string | null
+          close_reason: string | null
+          closed_at: string | null
+          company_id: string | null
+          created_at: string | null
+          ends_on: string | null
+          id: string | null
+          number: string | null
+          number_prefix: string | null
+          object: string | null
+          object_prefix: string | null
+          starts_on: string | null
+          updated_at: string | null
+          version: number | null
         }
         Relationships: [
           {

@@ -29,7 +29,9 @@ function requireSecret(value: string | undefined): string {
 }
 
 function uniqueDocumentationIp(): string {
-  const bytes = randomBytes(12).toString("hex").match(/.{1,4}/gu)
+  const bytes = randomBytes(12)
+    .toString("hex")
+    .match(/.{1,4}/gu)
   if (!bytes || bytes.length !== 6) {
     throw new Error(`${FIXTURE_NAME} is unavailable`)
   }
@@ -71,10 +73,7 @@ export function cookieStoreForAdversarialJar(jar: AdversarialCookieJar) {
       return value === undefined ? undefined : { name, value }
     },
     getAll: () => [...jar].map(([name, value]) => ({ name, value })),
-    set: (
-      name: string | { name: string; value: string },
-      value?: string,
-    ) => {
+    set: (name: string | { name: string; value: string }, value?: string) => {
       const cookieName = typeof name === "string" ? name : name.name
       const cookieValue = typeof name === "string" ? (value ?? "") : name.value
       if (cookieValue === "") jar.delete(cookieName)
@@ -158,12 +157,7 @@ export class AdversarialLocalFixture {
     this.memberA = this.identity("Membro A", this.companyAId)
     this.adminB = this.identity("Administrador B", this.companyBId)
     this.platform = this.identity("Super Admin", null)
-    this.identities = [
-      this.adminA,
-      this.memberA,
-      this.adminB,
-      this.platform,
-    ]
+    this.identities = [this.adminA, this.memberA, this.adminB, this.platform]
 
     this.admin = createClient<Database>(
       this.supabaseUrl,
@@ -208,7 +202,8 @@ export class AdversarialLocalFixture {
   }
 
   async create(): Promise<void> {
-    if (this.created) throw new Error("Task 17 adversarial fixture already exists")
+    if (this.created)
+      throw new Error("Task 17 adversarial fixture already exists")
     this.created = true
 
     for (const identity of this.identities) {
@@ -313,7 +308,10 @@ export class AdversarialLocalFixture {
        and membership.company_id = ${this.companyAId}::uuid
       where profile.email = ${input.email.trim().toLowerCase()}
     `
-    if (rows.length !== 1 || this.identities.some(({ userId }) => userId === rows[0]?.userId)) {
+    if (
+      rows.length !== 1 ||
+      this.identities.some(({ userId }) => userId === rows[0]?.userId)
+    ) {
       throw new Error("Task 10 provisioned identity adoption failed")
     }
     const row = rows[0]
@@ -347,15 +345,17 @@ export class AdversarialLocalFixture {
 
   async passwordSecurityState(userId: string): Promise<PasswordSecurityState> {
     const [row] = await this.ownerSql<
-      [{
-        activeSessionCount: number
-        encryptedPassword: string
-        mustChangePassword: boolean
-        operationCount: number
-        revokedSessionCount: number
-        sessionCutoff: Date | null
-        temporaryPasswordExpiresAt: Date | null
-      }]
+      [
+        {
+          activeSessionCount: number
+          encryptedPassword: string
+          mustChangePassword: boolean
+          operationCount: number
+          revokedSessionCount: number
+          sessionCutoff: Date | null
+          temporaryPasswordExpiresAt: Date | null
+        },
+      ]
     >`
       select auth_user.encrypted_password as "encryptedPassword",
              profile.must_change_password as "mustChangePassword",
@@ -391,6 +391,161 @@ export class AdversarialLocalFixture {
       sessionCutoff: row.sessionCutoff?.toISOString() ?? null,
       temporaryPasswordExpiresAt:
         row.temporaryPasswordExpiresAt?.toISOString() ?? null,
+    })
+  }
+
+  async contractClosureEvidence(contractId: string): Promise<
+    Readonly<{
+      actorUserId: string
+      auditCount: number
+      closeReason: string
+      closed: boolean
+    }>
+  > {
+    const [row] = await this.ownerSql<
+      [
+        {
+          actorUserId: string
+          auditCount: number
+          closeReason: string
+          closed: boolean
+        },
+      ]
+    >`
+      select contract.closed_by as "actorUserId",
+             contract.close_reason as "closeReason",
+             (contract.closed_at is not null) as closed,
+             (select count(*)::integer
+                from public.audit_events event
+               where event.company_id = contract.company_id
+                 and event.action = 'contract.closed'
+                 and event.resource_id = contract.id) as "auditCount"
+        from public.contracts contract
+       where contract.company_id = ${this.companyAId}::uuid
+         and contract.id = ${contractId}::uuid
+    `
+    if (!row || !row.actorUserId || !row.closeReason) {
+      throw new Error("Contract closure evidence is unavailable")
+    }
+    return Object.freeze(row)
+  }
+
+  async seedSyntheticContractAttachment(contractId: string): Promise<void> {
+    await this.ownerSql.begin(async (transaction) => {
+      await transaction`set local session_replication_role = replica`
+      await transaction`
+        insert into public.contract_attachments (
+          company_id,
+          contract_id,
+          file_object_id,
+          attachment_group_id,
+          version,
+          created_by
+        ) values (
+          ${this.companyAId}::uuid,
+          ${contractId}::uuid,
+          ${randomUUID()}::uuid,
+          ${randomUUID()}::uuid,
+          1,
+          ${this.adminA.userId}::uuid
+        )
+      `
+    })
+  }
+
+  async seedContractsForPagination(
+    clientId: string,
+    count: number,
+    numberPrefix: string,
+  ): Promise<string[]> {
+    if (!Number.isSafeInteger(count) || count < 1 || count > 100) {
+      throw new Error("Contract pagination seed count is invalid")
+    }
+    const rows = await this.ownerSql<{ id: string }[]>`
+      insert into public.contracts (
+        company_id, client_id, number, object, starts_on, ends_on,
+        amount, created_by, updated_by
+      )
+      select
+        ${this.companyAId}::uuid,
+        ${clientId}::uuid,
+        ${numberPrefix} || lpad((series.value - 1)::text, 3, '0'),
+        'Pagination seed contract ' || series.value,
+        '2026-01-01'::date,
+        '2027-01-01'::date + ((series.value - 1) / 3)::integer,
+        12500,
+        ${this.adminA.userId}::uuid,
+        ${this.adminA.userId}::uuid
+      from generate_series(1, ${count}) series(value)
+      returning id
+    `
+    if (rows.length !== count) {
+      throw new Error("Contract pagination seed failed")
+    }
+    return rows.map(({ id }) => id)
+  }
+
+  async contractPrefixSearchPlan(): Promise<string> {
+    const token = randomUUID().replaceAll("-", "")
+    const targetPrefix = `plan-target-${token}-`
+    const bulkPrefix = `plan-bulk-${token}-`
+    const targetObjectPrefix = `object-target-${token}-`
+    const bulkObjectPrefix = `object-bulk-${token}-`
+    return this.ownerSql.begin(async (transaction) => {
+      await transaction`
+        insert into public.contracts (
+          company_id, client_id, number, object, starts_on, ends_on,
+          amount, created_by, updated_by
+        )
+        select
+          ${this.companyAId}::uuid,
+          client.id,
+          case
+            when series.value <= 20
+              then ${targetPrefix} || lpad(series.value::text, 5, '0')
+            else ${bulkPrefix} || lpad(series.value::text, 5, '0')
+          end,
+          case
+            when series.value <= 20
+              then ${targetObjectPrefix} || lpad(series.value::text, 5, '0')
+            else ${bulkObjectPrefix} || lpad(series.value::text, 5, '0')
+          end,
+          '2026-01-01'::date,
+          '2027-01-01'::date + (series.value % 300),
+          100,
+          ${this.adminA.userId}::uuid,
+          ${this.adminA.userId}::uuid
+        from public.clients client
+        cross join generate_series(1, 20000) series(value)
+        where client.company_id = ${this.companyAId}::uuid
+        limit 20000
+      `
+      await transaction`analyze public.contracts`
+      const numberPlan = await transaction<Record<string, unknown>[]>`
+        explain (analyze, buffers, format json)
+        select id
+        from public.contract_search_rows
+        where company_id = ${this.companyAId}::uuid
+          and number_prefix like ${`${targetPrefix.toLocaleLowerCase("pt-BR")}%`}
+        order by ends_on, id
+        limit 25
+      `
+      const objectPlan = await transaction<Record<string, unknown>[]>`
+        explain (analyze, buffers, format json)
+        select id
+        from public.contract_search_rows
+        where company_id = ${this.companyAId}::uuid
+          and object_prefix like ${`${targetObjectPrefix.toLocaleLowerCase("pt-BR")}%`}
+        order by ends_on, id
+        limit 25
+      `
+      await transaction`
+        delete from public.contracts
+        where company_id = ${this.companyAId}::uuid
+          and (number like ${`${targetPrefix}%`} or number like ${`${bulkPrefix}%`})
+      `
+      await transaction`analyze public.contracts`
+      return JSON.stringify({ numberPlan, objectPlan })
     })
   }
 
