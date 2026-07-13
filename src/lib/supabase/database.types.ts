@@ -1585,6 +1585,47 @@ export type Database = {
           },
         ]
       }
+      contract_client_aggregates: {
+        Row: {
+          client_id: string | null
+          company_id: string | null
+          record_count: number | null
+          total: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contracts_client_fk"
+            columns: ["company_id", "client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "contracts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      proposal_client_aggregates: {
+        Row: {
+          client_id: string | null
+          company_id: string | null
+          record_count: number | null
+          total: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "proposals_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       company_commit_member_provisioning: {
