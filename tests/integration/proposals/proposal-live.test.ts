@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
+import { PDFDocument } from "pdf-lib"
 
 import { POST as loginPost } from "@/app/api/auth/login/route"
 import { POST as clientsPost } from "@/app/api/administrative/clients/route"
@@ -15,7 +16,13 @@ import {
   GET as proposalGet,
 } from "@/app/api/administrative/proposals/[proposalId]/route"
 import { POST as proposalStatusPost } from "@/app/api/administrative/proposals/[proposalId]/status/route"
+import {
+  GET as proposalDocumentsGet,
+  POST as proposalDocumentsPost,
+} from "@/app/api/administrative/proposals/[proposalId]/documents/route"
+import { GET as proposalDocumentDownload } from "@/app/api/administrative/proposals/[proposalId]/documents/[documentId]/download/route"
 import { NO_STORE_HEADERS } from "@/lib/security/no-store"
+import { getAdminSupabase } from "@/lib/supabase/admin"
 import {
   AdversarialLocalFixture,
   cookieStoreForAdversarialJar,
@@ -44,6 +51,9 @@ const appOrigin = requireLocalHttpUrl(
 
 type ProposalRouteContext = Readonly<{ params: Promise<{ proposalId: string }> }>
 type CatalogRouteContext = Readonly<{ params: Promise<{ itemId: string }> }>
+type DocumentRouteContext = Readonly<{
+  params: Promise<{ proposalId: string; documentId: string }>
+}>
 
 function request(
   path: string,
@@ -76,6 +86,10 @@ function proposalContext(proposalId: string): ProposalRouteContext {
 
 function catalogContext(itemId: string): CatalogRouteContext {
   return { params: Promise.resolve({ itemId }) }
+}
+
+function documentContext(proposalId: string, documentId: string): DocumentRouteContext {
+  return { params: Promise.resolve({ proposalId, documentId }) }
 }
 
 async function authenticate(identity: AdversarialIdentity): Promise<void> {
@@ -200,6 +214,13 @@ beforeAll(async () => {
 
 afterAll(async () => {
   try {
+    const storage = getAdminSupabase().storage.from("axsys-private")
+    for (const companyId of [fixture.companyAId, fixture.companyBId]) {
+      const prefix = `${companyId}/generated-documents`
+      const listed = await storage.list(prefix, { limit: 100 })
+      const paths = (listed.data ?? []).map(({ name }) => `${prefix}/${name}`)
+      if (paths.length > 0) await storage.remove(paths)
+    }
     await fixture.cleanup()
   } finally {
     requestCookies.current = undefined
@@ -285,7 +306,7 @@ describe.sequential("proposal live RLS, numbering and snapshot flow", () => {
       "Descrição histórica do serviço",
       "Descrição histórica do produto",
     ])
-    expect(detailBody.items[1]?.quantity).toBe("2.500")
+    expect(detailBody.items[1]?.quantity).toBe("2.5")
   })
 
   it("makes a foreign proposal indistinguishable from a random identifier", async () => {
@@ -337,4 +358,74 @@ describe.sequential("proposal live RLS, numbering and snapshot flow", () => {
     })
     expectNoStore(deleted)
   })
+
+  it("generates versioned PDFs, downloads verified bytes and unlocks sending", async () => {
+    requestCookies.current = fixture.adminA.jar
+    const target = proposalsA[1]!
+    const first = await proposalDocumentsPost(request(
+      `/api/administrative/proposals/${target.id}/documents`,
+      {
+        csrf: fixture.issueCsrf(fixture.adminA.jar),
+        identity: fixture.adminA,
+        method: "POST",
+      },
+    ), proposalContext(target.id))
+    const second = await proposalDocumentsPost(request(
+      `/api/administrative/proposals/${target.id}/documents`,
+      {
+        csrf: fixture.issueCsrf(fixture.adminA.jar),
+        identity: fixture.adminA,
+        method: "POST",
+      },
+    ), proposalContext(target.id))
+    const generationErrors = await Promise.all([first, second].map(async (response) =>
+      response.status === 201 ? null : await response.clone().json(),
+    ))
+    expect({ statuses: [first.status, second.status], generationErrors }).toEqual({
+      statuses: [201, 201],
+      generationErrors: [null, null],
+    })
+    const firstBody = (await first.json()) as { documentId: string; version: number }
+    const secondBody = (await second.json()) as { documentId: string; version: number }
+    expect([firstBody.version, secondBody.version]).toEqual([1, 2])
+    expect(firstBody.documentId).not.toBe(secondBody.documentId)
+
+    const history = await proposalDocumentsGet(
+      request(`/api/administrative/proposals/${target.id}/documents`, {
+        identity: fixture.adminA,
+      }),
+      proposalContext(target.id),
+    )
+    expect(history.status).toBe(200)
+    const historyBody = (await history.json()) as Array<{ version: number }>
+    expect(historyBody.map(({ version }) => version)).toEqual([2, 1])
+
+    const download = await proposalDocumentDownload(
+      request(`/api/administrative/proposals/${target.id}/documents/${secondBody.documentId}/download`, {
+        identity: fixture.adminA,
+      }),
+      documentContext(target.id, secondBody.documentId),
+    )
+    expect(download.status).toBe(200)
+    expect(download.headers.get("content-type")).toBe("application/pdf")
+    expect(download.headers.get("content-security-policy")).toBe("sandbox")
+    expect(download.headers.get("x-content-type-options")).toBe("nosniff")
+    expect(download.headers.get("cache-control")).toContain("no-store")
+    const bytes = Buffer.from(await download.arrayBuffer())
+    expect(bytes.subarray(0, 5).toString("ascii")).toBe("%PDF-")
+    expect((await PDFDocument.load(bytes)).getPageCount()).toBeGreaterThan(0)
+
+    const sent = await proposalStatusPost(request(
+      `/api/administrative/proposals/${target.id}/status`,
+      {
+        body: { expectedVersion: target.version, nextStatus: "sent" },
+        csrf: fixture.issueCsrf(fixture.adminA.jar),
+        identity: fixture.adminA,
+        method: "POST",
+      },
+    ), proposalContext(target.id))
+    expect(sent.status).toBe(200)
+    expect(((await sent.json()) as { record: { status: string } }).record.status)
+      .toBe("sent")
+  }, 60_000)
 })

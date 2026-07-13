@@ -5,6 +5,7 @@ const source = readFileSync("src/lib/db/bff.ts", "utf8");
 const migration = [
   "supabase/migrations/20260713004222_administrative_rls.sql",
   "supabase/migrations/20260713015131_proposal_total_mismatch_security_event.sql",
+  "supabase/migrations/20260713015558_proposal_document_writer.sql",
 ].map((file) => readFileSync(file, "utf8")).join("\n");
 
 const routines = [
@@ -29,6 +30,9 @@ const routines = [
   "delete_contract",
   "version_contract_attachment",
   "write_proposal_total_mismatch_security_event",
+  "store_proposal_document",
+  "authorize_proposal_document_download",
+  "record_generated_document_orphan_cleanup",
 ] as const;
 
 const methods = [
@@ -53,6 +57,9 @@ const methods = [
   "deleteContract",
   "versionContractAttachment",
   "writeProposalTotalMismatchSecurityEvent",
+  "storeProposalDocument",
+  "authorizeProposalDocumentDownload",
+  "recordGeneratedDocumentOrphanCleanup",
 ] as const;
 
 describe("administrative BFF boundary", () => {

@@ -10,6 +10,8 @@ const ROOTS = [
   "src/modules/administrative/server/catalog-item-service.ts",
   "src/modules/proposals/server/proposal-repository.ts",
   "src/modules/proposals/server/proposal-service.ts",
+  "src/modules/documents/server/generated-document-repository.ts",
+  "src/modules/documents/server/proposal-pdf-service.ts",
 ] as const
 
 describe("administrative mutation boundary", () => {

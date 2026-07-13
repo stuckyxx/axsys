@@ -267,6 +267,12 @@ export class AdversarialLocalFixture {
            ${this.adminB.userId}::uuid, 'company_admin')
       `
       await transaction`
+        insert into public.company_settings(company_id,updated_by)
+        values
+          (${this.companyAId}::uuid,${this.adminA.userId}::uuid),
+          (${this.companyBId}::uuid,${this.adminB.userId}::uuid)
+      `
+      await transaction`
         insert into public.member_modules (company_id, membership_id, module)
         values
           (${this.companyAId}::uuid, ${this.adminA.membershipId}::uuid, 'administrative'),
@@ -502,6 +508,10 @@ export class AdversarialLocalFixture {
             where company_id = any(${companyIds}::uuid[])
           `
           await transaction`
+            delete from private.generated_document_orphan_cleanup
+            where company_id = any(${companyIds}::uuid[])
+          `
+          await transaction`
             delete from public.contract_attachments
             where company_id = any(${companyIds}::uuid[])
           `
@@ -516,6 +526,30 @@ export class AdversarialLocalFixture {
           await transaction`
             delete from public.contracts
             where company_id = any(${companyIds}::uuid[])
+          `
+          await transaction`
+            delete from public.company_settings_drafts
+            where company_id = any(${companyIds}::uuid[])
+               or user_id = any(${userIds}::uuid[])
+          `
+          await transaction`
+            delete from public.company_settings
+            where company_id = any(${companyIds}::uuid[])
+          `
+          await transaction`
+            delete from public.company_bank_accounts
+            where company_id = any(${companyIds}::uuid[])
+          `
+          await transaction`
+            delete from public.file_upload_intents
+            where company_id = any(${companyIds}::uuid[])
+               or actor_user_id = any(${userIds}::uuid[])
+          `
+          await transaction`
+            delete from public.file_objects
+            where company_id = any(${companyIds}::uuid[])
+               or created_by = any(${userIds}::uuid[])
+               or owner_user_id = any(${userIds}::uuid[])
           `
           await transaction`
             delete from public.clients
@@ -615,6 +649,8 @@ export class AdversarialLocalFixture {
                   or auth_user_id = any(${userIds}::uuid[]))
             + (select count(*) from public.generated_documents
                where company_id = any(${companyIds}::uuid[]))
+            + (select count(*) from private.generated_document_orphan_cleanup
+               where company_id = any(${companyIds}::uuid[]))
             + (select count(*) from public.contract_attachments
                where company_id = any(${companyIds}::uuid[]))
             + (select count(*) from public.proposal_items
@@ -623,6 +659,20 @@ export class AdversarialLocalFixture {
                where company_id = any(${companyIds}::uuid[]))
             + (select count(*) from public.contracts
                where company_id = any(${companyIds}::uuid[]))
+            + (select count(*) from public.company_settings_drafts
+               where company_id = any(${companyIds}::uuid[])
+                  or user_id = any(${userIds}::uuid[]))
+            + (select count(*) from public.company_settings
+               where company_id = any(${companyIds}::uuid[]))
+            + (select count(*) from public.company_bank_accounts
+               where company_id = any(${companyIds}::uuid[]))
+            + (select count(*) from public.file_upload_intents
+               where company_id = any(${companyIds}::uuid[])
+                  or actor_user_id = any(${userIds}::uuid[]))
+            + (select count(*) from public.file_objects
+               where company_id = any(${companyIds}::uuid[])
+                  or created_by = any(${userIds}::uuid[])
+                  or owner_user_id = any(${userIds}::uuid[]))
             + (select count(*) from public.clients
                where company_id = any(${companyIds}::uuid[]))
             + (select count(*) from public.catalog_items

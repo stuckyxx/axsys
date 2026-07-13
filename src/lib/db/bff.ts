@@ -786,6 +786,34 @@ const proposalWithItemsMutationSchema = z
     scopes: z.tuple([z.literal("proposals"), z.literal("dashboard")]),
   })
   .strict()
+const proposalDocumentMutationSchema = z
+  .object({
+    documentId: z.uuid(),
+    version: z.int().positive(),
+    checksumSha256: z.string().regex(/^[0-9a-f]{64}$/u),
+    templateVersion: z.literal("proposal-v1"),
+    createdAt: administrativeTimestampSchema,
+    scopes: z.tuple([z.literal("proposals"), z.literal("storage")]),
+  })
+  .strict()
+const proposalDocumentDownloadSchema = z
+  .object({
+    bucket: z.literal("axsys-private"),
+    path: z.string().min(1).max(1024),
+    mime: z.literal("application/pdf"),
+    byteSize: z.union([z.int().positive(), z.string().regex(/^\d+$/u)]),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+    downloadName: z.string().min(1).max(255),
+    attemptId: z.uuid(),
+    completionNonce: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
+  })
+  .strict()
+const proposalDocumentOrphanCleanupSchema = z
+  .object({
+    cleanupId: z.uuid(),
+    recordedAt: administrativeTimestampSchema,
+  })
+  .strict()
 const contractCreateMutationSchema = z
   .object({
     record: contractMutationRecordSchema,
@@ -2585,6 +2613,79 @@ export const bffDb = {
       [{ result: unknown }]
     >`select private.delete_draft_proposal(${input.actorUserId}::uuid,${input.sessionId}::uuid,${input.proposalId}::uuid,${input.expectedVersion}::bigint,${input.correlationId}::uuid) as result`
     return proposalDeleteMutationSchema.parse(row?.result)
+  },
+  async storeProposalDocument(input: {
+    actorUserId: string
+    sessionId: string
+    proposalId: string
+    objectPath: string
+    contentType: "application/pdf"
+    byteSize: number
+    sha256: string
+    snapshot: Record<string, unknown>
+    templateVersion: "proposal-v1"
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const snapshot = toJsonObject(input.snapshot)
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.store_proposal_document(
+      ${input.actorUserId}::uuid,
+      ${input.sessionId}::uuid,
+      ${input.proposalId}::uuid,
+      ${input.objectPath},
+      ${input.contentType},
+      ${input.byteSize}::bigint,
+      ${input.sha256},
+      ${sql.json(snapshot)}::jsonb,
+      ${input.templateVersion},
+      ${input.correlationId}::uuid
+    ) as result`
+    return proposalDocumentMutationSchema.parse(row?.result)
+  },
+  async authorizeProposalDocumentDownload(input: {
+    actorUserId: string
+    sessionId: string
+    documentId: string
+    correlationId: string
+    signal: AbortSignal
+  }) {
+    if (input.signal.aborted) throw new Error(BFF_DATABASE_FAILURE)
+    const sql = await getSql()
+    if (input.signal.aborted) throw new Error(BFF_DATABASE_FAILURE)
+    const query = sql<
+      [{ result: unknown }]
+    >`select private.authorize_proposal_document_download(
+      ${input.actorUserId}::uuid,
+      ${input.sessionId}::uuid,
+      ${input.documentId}::uuid,
+      ${input.correlationId}::uuid
+    ) as result`
+    const [row] = await executeCancellableQuery(query, input.signal)
+    const parsed = proposalDocumentDownloadSchema.parse(row?.result)
+    return { ...parsed, byteSize: toSafeInteger(parsed.byteSize) }
+  },
+  async recordGeneratedDocumentOrphanCleanup(input: {
+    actorUserId: string
+    sessionId: string
+    proposalId: string
+    objectPath: string
+    sha256: string
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.record_generated_document_orphan_cleanup(
+      ${input.actorUserId}::uuid,
+      ${input.sessionId}::uuid,
+      ${input.proposalId}::uuid,
+      ${input.objectPath},
+      ${input.sha256},
+      ${input.correlationId}::uuid
+    ) as result`
+    return proposalDocumentOrphanCleanupSchema.parse(row?.result)
   },
   async createContract(input: {
     actorUserId: string

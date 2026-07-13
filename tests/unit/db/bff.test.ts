@@ -12,7 +12,7 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe("bffDb boundary", () => {
-  it("exports only the eighty-five typed application database operations", () => {
+  it("exports only the eighty-eight typed application database operations", () => {
     expect(Object.keys(bffDb).sort()).toEqual([
       "activateFileUploadAuthorization",
       "archiveBankAccount",
@@ -21,6 +21,7 @@ describe("bffDb boundary", () => {
       "assertAuthSession",
       "attachOwnAvatar",
       "authorizeImageFileDownload",
+      "authorizeProposalDocumentDownload",
       "beginFileFinalization",
       "beginPasswordRecovery",
       "beginTemporaryPasswordReset",
@@ -69,6 +70,7 @@ describe("bffDb boundary", () => {
       "markFileCleanupRequired",
       "markProvisioningAuthCreated",
       "markProvisioningCompensation",
+      "recordGeneratedDocumentOrphanCleanup",
       "registerAuthSession",
       "rejectFileUpload",
       "releaseFileFinalizationForRetry",
@@ -83,6 +85,7 @@ describe("bffDb boundary", () => {
       "saveProposalItems",
       "setCompanyStatus",
       "setDefaultBankAccount",
+      "storeProposalDocument",
       "syncConfirmedProfileEmail",
       "transitionProposalStatus",
       "updateCatalogItem",
@@ -200,6 +203,48 @@ describe("bffDb boundary", () => {
     expectTypeOf(
       bffDb.writeProposalTotalMismatchSecurityEvent,
     ).returns.toEqualTypeOf<Promise<void>>()
+    expectTypeOf<Parameters<typeof bffDb.storeProposalDocument>>().toEqualTypeOf<
+      [
+        input: {
+          actorUserId: string
+          sessionId: string
+          proposalId: string
+          objectPath: string
+          contentType: "application/pdf"
+          byteSize: number
+          sha256: string
+          snapshot: Record<string, unknown>
+          templateVersion: "proposal-v1"
+          correlationId: string
+        },
+      ]
+    >()
+    expectTypeOf<Parameters<typeof bffDb.authorizeProposalDocumentDownload>>()
+      .toEqualTypeOf<
+        [
+          input: {
+            actorUserId: string
+            sessionId: string
+            documentId: string
+            correlationId: string
+            signal: AbortSignal
+          },
+        ]
+      >()
+    expectTypeOf<
+      Parameters<typeof bffDb.recordGeneratedDocumentOrphanCleanup>
+    >().toEqualTypeOf<
+      [
+        input: {
+          actorUserId: string
+          sessionId: string
+          proposalId: string
+          objectPath: string
+          sha256: string
+          correlationId: string
+        },
+      ]
+    >()
     expectTypeOf<
       Parameters<typeof bffDb.revokeSessionsAndWriteLogout>
     >().toEqualTypeOf<
@@ -447,6 +492,7 @@ describe("bffDb boundary", () => {
       "archive_client",
       "assert_auth_session",
       "authorize_image_file_download",
+      "authorize_proposal_document_download",
       "begin_password_recovery",
       "begin_temporary_password_reset",
       "cancel_stale_reserved_upload_intents",
@@ -510,6 +556,7 @@ describe("bffDb boundary", () => {
       "internal_upsert_bank_account",
       "internal_upsert_own_company_settings_draft",
       "list_company_user_directory",
+      "record_generated_document_orphan_cleanup",
       "register_auth_session",
       "release_upload_authorization_retirement_claim",
       "reserve_image_upload_intent",
@@ -518,6 +565,7 @@ describe("bffDb boundary", () => {
       "revoke_sessions_and_write_logout",
       "rotate_app_session_after_reauthentication",
       "save_proposal_items",
+      "store_proposal_document",
       "transition_proposal_status",
       "update_catalog_item",
       "update_client",

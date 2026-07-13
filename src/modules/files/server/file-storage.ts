@@ -15,6 +15,11 @@ export type PrivateDownloadStorage = Readonly<{
   ): Promise<ReadableStream<Uint8Array>>
 }>
 
+export type GeneratedDocumentStorage = Readonly<{
+  uploadPdf(path: string, bytes: Buffer): Promise<void>
+  removePrivate(path: string): Promise<void>
+}>
+
 const STORAGE_PATH_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u
 const PRIVATE_DOWNLOAD_FAILURE = "Private download unavailable"
 
@@ -118,6 +123,24 @@ export function getFileFinalizationStorage(): FileFinalizationStorage {
     async removeQuarantine(path) {
       const result = await admin.storage.from("axsys-quarantine").remove([path])
       if (result.error !== null) throw new Error("Quarantine removal unavailable")
+    },
+  })
+}
+
+export function getGeneratedDocumentStorage(): GeneratedDocumentStorage {
+  const admin = getAdminSupabase()
+  return Object.freeze({
+    async uploadPdf(path, bytes) {
+      const result = await admin.storage.from("axsys-private").upload(path, bytes, {
+        cacheControl: "0",
+        contentType: "application/pdf",
+        upsert: false,
+      })
+      if (result.error !== null) throw new Error("Document upload unavailable")
+    },
+    async removePrivate(path) {
+      const result = await admin.storage.from("axsys-private").remove([path])
+      if (result.error !== null) throw new Error("Document removal unavailable")
     },
   })
 }

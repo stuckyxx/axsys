@@ -130,6 +130,14 @@ function decimal(value: string | number, places: number): string {
   return parsed.toFixed(places)
 }
 
+function quantityDecimal(value: string | number): string {
+  const parsed = new Decimal(String(value))
+  if (!parsed.isFinite() || !parsed.greaterThan(0) || parsed.decimalPlaces() > 3) {
+    throw new Error("INVALID_DB_QUANTITY")
+  }
+  return parsed.toFixed(3).replace(/0+$/u, "").replace(/\.$/u, "")
+}
+
 function mapProposal(row: z.infer<typeof proposalRowSchema>): ProposalDTO {
   return {
     id: row.id,
@@ -157,7 +165,7 @@ function mapProposalItem(row: z.infer<typeof proposalItemRowSchema>): ProposalIt
     months: row.months,
     monthlyAmount:
       row.monthly_amount === null ? null : decimal(row.monthly_amount, 2),
-    quantity: row.quantity === null ? null : decimal(row.quantity, 3),
+    quantity: row.quantity === null ? null : quantityDecimal(row.quantity),
     unitAmount: row.unit_amount === null ? null : decimal(row.unit_amount, 2),
     lineTotal: decimal(row.line_total, 2),
   }
