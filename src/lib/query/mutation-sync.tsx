@@ -3,7 +3,11 @@
 import type { QueryClient } from "@tanstack/react-query"
 import { useEffect } from "react"
 
-import { queryKeys, type QueryScope } from "@/lib/query/query-keys"
+import {
+  administrativeKeys,
+  queryKeys,
+  type QueryScope,
+} from "@/lib/query/query-keys"
 import {
   openInvalidationChannel,
   type ClientInvalidation,
@@ -12,11 +16,20 @@ import {
 type InvalidationClient = Pick<QueryClient, "clear" | "invalidateQueries">
 type ReplaceLocation = (path: string) => void
 type StopDocument = () => void
-type MutationSyncOptions = Readonly<{ onInvalidate?: () => void }>
+type MutationSyncOptions = Readonly<{
+  onInvalidate?: () => void
+  senderId?: string
+}>
 
 const RESOURCE_PATTERN = /^[a-z0-9][a-z0-9:_-]{0,79}$/u
 const MAX_RESOURCES = 32
 const MAX_IDENTIFIER_LENGTH = 128
+let browserMutationSenderId: string | undefined
+
+export function getMutationSenderId(): string {
+  browserMutationSenderId ??= globalThis.crypto.randomUUID()
+  return browserMutationSenderId
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -95,6 +108,42 @@ function matchesScope(
   )
 }
 
+function administrativeInvalidationKeys(
+  scope: QueryScope,
+  resource: string,
+): readonly (readonly unknown[])[] {
+  if (scope.companyId === null) return []
+  if (["clients", "client-detail", "client-count"].includes(resource)) {
+    return [
+      administrativeKeys.clients(scope.userId, scope.companyId),
+      administrativeKeys.proposals(scope.userId, scope.companyId),
+      administrativeKeys.contracts(scope.userId, scope.companyId),
+      queryKeys.resource(scope, "dashboard"),
+    ]
+  }
+  if (["catalog", "catalog-items"].includes(resource)) {
+    return [
+      administrativeKeys.catalog(scope.userId, scope.companyId),
+      administrativeKeys.proposals(scope.userId, scope.companyId),
+    ]
+  }
+  if (["proposals", "proposal-documents"].includes(resource)) {
+    return [
+      administrativeKeys.proposals(scope.userId, scope.companyId),
+      queryKeys.resource(scope, "dashboard"),
+    ]
+  }
+  if (["contracts", "contract-attachments"].includes(resource)) {
+    return [
+      administrativeKeys.contracts(scope.userId, scope.companyId),
+      queryKeys.resource(scope, "dashboard"),
+      queryKeys.resource(scope, "notifications"),
+      queryKeys.resource(scope, "payments"),
+    ]
+  }
+  return []
+}
+
 export function publishInvalidation(event: ClientInvalidation): void {
   if (readClientInvalidation(event) === null) {
     throw new TypeError("Invalid invalidation signal")
@@ -127,9 +176,16 @@ export function applyClientInvalidation(
   replaceLocation: ReplaceLocation = (path) => window.location.replace(path),
   onInvalidate?: () => void,
   stopDocument: StopDocument = () => window.stop(),
+  localSenderId?: string,
 ): void {
   const event = readClientInvalidation(value)
-  if (event === null || !matchesScope(event.scope, scope)) return
+  if (
+    event === null ||
+    event.senderId === localSenderId ||
+    !matchesScope(event.scope, scope)
+  ) {
+    return
+  }
 
   if (event.type === "session-ended") {
     queryClient.clear()
@@ -141,10 +197,21 @@ export function applyClientInvalidation(
     return
   }
 
+  const keysSeen = new Set<string>()
+  const invalidate = (queryKey: readonly unknown[]) => {
+    const serialized = JSON.stringify(queryKey)
+    if (keysSeen.has(serialized)) return
+    keysSeen.add(serialized)
+    void queryClient.invalidateQueries({ queryKey })
+  }
   for (const resource of new Set(event.resources)) {
-    void queryClient.invalidateQueries({
-      queryKey: queryKeys.resource(scope, resource),
-    })
+    invalidate(queryKeys.resource(scope, resource))
+    for (const administrativeKey of administrativeInvalidationKeys(
+      scope,
+      resource,
+    )) {
+      invalidate(administrativeKey)
+    }
   }
   onInvalidate?.()
 }
@@ -152,7 +219,7 @@ export function applyClientInvalidation(
 export function useMutationSync(
   scope: QueryScope,
   queryClient: InvalidationClient,
-  { onInvalidate }: MutationSyncOptions = {},
+  { onInvalidate, senderId }: MutationSyncOptions = {},
 ): void {
   useEffect(() => {
     if (typeof BroadcastChannel !== "function") return
@@ -170,6 +237,8 @@ export function useMutationSync(
         queryClient,
         undefined,
         onInvalidate,
+        undefined,
+        senderId,
       )
     }
 
@@ -182,5 +251,5 @@ export function useMutationSync(
         // Optional cross-tab transport cleanup is best effort.
       }
     }
-  }, [onInvalidate, queryClient, scope])
+  }, [onInvalidate, queryClient, scope, senderId])
 }

@@ -3,9 +3,12 @@
 import type { ReactNode } from "react"
 import {
   BuildingsIcon,
+  BriefcaseIcon,
   CertificateIcon,
   CurrencyCircleDollarIcon,
-  GaugeIcon,
+  FileTextIcon,
+  HandshakeIcon,
+  HouseIcon,
   IdentificationCardIcon,
   UserCircleIcon,
   UsersThreeIcon,
@@ -28,23 +31,42 @@ export type CompanyShellContext = Readonly<{
   role: CompanyRole
 }>
 
-const MODULE_ITEMS = {
-  administrative: {
+const ADMINISTRATIVE_ITEMS = [
+  {
     href: "/app/administrativo/clientes",
-    icon: IdentificationCardIcon,
-    label: "Administrativo",
+    icon: UsersThreeIcon,
+    label: "Clientes",
   },
-  financial: {
+  {
+    href: "/app/administrativo/servicos",
+    icon: BriefcaseIcon,
+    label: "Serviços",
+  },
+  {
+    href: "/app/administrativo/propostas",
+    icon: FileTextIcon,
+    label: "Propostas",
+  },
+  {
+    href: "/app/administrativo/contratos",
+    icon: HandshakeIcon,
+    label: "Contratos",
+  },
+] as const satisfies readonly NavigationItem[]
+
+const MODULE_ITEMS: Record<ModuleKey, readonly NavigationItem[]> = {
+  financial: [{
     href: "/app/financeiro",
     icon: CurrencyCircleDollarIcon,
     label: "Financeiro",
-  },
-  certificates: {
+  }],
+  certificates: [{
     href: "/app/certidoes",
     icon: CertificateIcon,
     label: "Certidões",
-  },
-} as const satisfies Record<ModuleKey, NavigationItem>
+  }],
+  administrative: ADMINISTRATIVE_ITEMS,
+}
 
 type CompanyShellProps = Readonly<{
   children: ReactNode
@@ -53,12 +75,16 @@ type CompanyShellProps = Readonly<{
 
 export function CompanyShell({ children, context }: CompanyShellProps) {
   const items: NavigationItem[] = [
-    { href: "/app/dashboard", icon: GaugeIcon, label: "Dashboard" },
-    ...context.modules.map((module) => MODULE_ITEMS[module]),
+    { href: "/app/dashboard", icon: HouseIcon, label: "Dashboard" },
+    ...context.modules.flatMap((module) => MODULE_ITEMS[module]),
   ]
 
   if (context.role === "company_admin") {
-    items.push({ href: "/app/usuarios", icon: UsersThreeIcon, label: "Usuários" })
+    items.push({
+      href: "/app/usuarios",
+      icon: IdentificationCardIcon,
+      label: "Usuários",
+    })
   }
 
   items.push({

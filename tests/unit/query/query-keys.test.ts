@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest"
 
-import { queryKeys, type QueryScope } from "@/lib/query/query-keys"
+import {
+  administrativeKeys,
+  queryKeys,
+  type QueryScope,
+} from "@/lib/query/query-keys"
 
 const USER_A = "10000000-0000-4000-8000-000000000001"
 const USER_B = "20000000-0000-4000-8000-000000000002"
@@ -31,5 +35,52 @@ describe("Task 16 scoped query keys", () => {
       "detail",
       "client-7",
     ])
+  })
+
+  it("freezes administrative list and detail roots under user and tenant", () => {
+    expect(administrativeKeys.clients(USER_A, COMPANY_A)).toEqual([
+      "axsys",
+      USER_A,
+      COMPANY_A,
+      "administrative",
+      "clients",
+    ])
+    expect(administrativeKeys.client(USER_A, COMPANY_A, "client-7")).toEqual([
+      "axsys",
+      USER_A,
+      COMPANY_A,
+      "administrative",
+      "clients",
+      "client-7",
+    ])
+    expect(administrativeKeys.catalog(USER_A, COMPANY_A)).toEqual([
+      "axsys",
+      USER_A,
+      COMPANY_A,
+      "administrative",
+      "catalog-items",
+    ])
+    expect(administrativeKeys.clientList(USER_A, COMPANY_A, {
+      q: "Horizonte",
+      cursor: "cursor-a",
+      limit: 25,
+    })).toEqual([
+      "axsys",
+      USER_A,
+      COMPANY_A,
+      "administrative",
+      "clients",
+      "list",
+      { q: "Horizonte", cursor: "cursor-a", limit: 25 },
+    ])
+    expect(administrativeKeys.clientList(USER_A, COMPANY_A, {
+      q: "Horizonte",
+      cursor: "cursor-b",
+      limit: 25,
+    })).not.toEqual(administrativeKeys.clientList(USER_A, COMPANY_A, {
+      q: "Horizonte",
+      cursor: "cursor-a",
+      limit: 25,
+    }))
   })
 })

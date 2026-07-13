@@ -7,7 +7,11 @@ import { useRouter } from "next/navigation"
 import { Toaster } from "@/components/ui/sonner"
 import { ProtectedThemeProvider } from "@/components/theme/protected-theme-provider"
 import { PROFILE_THEME_INVALIDATED_EVENT } from "@/components/theme/theme-toggle"
-import { publishInvalidation, useMutationSync } from "@/lib/query/mutation-sync"
+import {
+  getMutationSenderId,
+  publishInvalidation,
+  useMutationSync,
+} from "@/lib/query/mutation-sync"
 import { queryKeys, type QueryScope } from "@/lib/query/query-keys"
 import { QueryProvider } from "@/lib/query/query-provider"
 import { useSessionWatchdog } from "@/lib/query/session-watchdog"
@@ -61,7 +65,7 @@ function ScopedSignalBridge({
 }: Readonly<{ companyId: string | null; userId: string }>) {
   const queryClient = useQueryClient()
   const router = useRouter()
-  const [senderId] = useState(() => globalThis.crypto.randomUUID())
+  const [senderId] = useState(getMutationSenderId)
   const scope = useMemo(
     () => Object.freeze({ companyId, userId }),
     [companyId, userId],
@@ -81,7 +85,10 @@ function ScopedSignalBridge({
     revalidateFromSignal()
   }, [queryClient, revalidateFromSignal, scope])
 
-  useMutationSync(scope, queryClient, { onInvalidate: revalidateFromSignal })
+  useMutationSync(scope, queryClient, {
+    onInvalidate: revalidateFromSignal,
+    senderId,
+  })
 
   useEffect(() => {
     const publishProfileSignal = () => {

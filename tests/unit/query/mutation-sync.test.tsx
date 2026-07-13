@@ -6,7 +6,11 @@ import {
   publishInvalidation,
   useMutationSync,
 } from "@/lib/query/mutation-sync"
-import { queryKeys, type QueryScope } from "@/lib/query/query-keys"
+import {
+  administrativeKeys,
+  queryKeys,
+  type QueryScope,
+} from "@/lib/query/query-keys"
 import {
   INVALIDATION_CHANNEL,
   type ClientInvalidation,
@@ -191,7 +195,7 @@ describe("Task 16 mutation synchronization", () => {
 
     channel.emit(invalidation())
 
-    await waitFor(() => expect(invalidateQueries).toHaveBeenCalledTimes(4))
+    await waitFor(() => expect(invalidateQueries).toHaveBeenCalledTimes(7))
     for (const resource of [
       "clients",
       "client-detail",
@@ -202,6 +206,15 @@ describe("Task 16 mutation synchronization", () => {
         queryKey: queryKeys.resource(SCOPE, resource),
       })
     }
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: administrativeKeys.clients(USER_A, COMPANY_A),
+    })
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: administrativeKeys.proposals(USER_A, COMPANY_A),
+    })
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: administrativeKeys.contracts(USER_A, COMPANY_A),
+    })
     expect(setQueryData).not.toHaveBeenCalled()
 
     unmount()
@@ -225,6 +238,23 @@ describe("Task 16 mutation synchronization", () => {
       ...invalidation(),
       payload: { tradeName: "Não pode atravessar abas" },
     })
+
+    expect(invalidateQueries).not.toHaveBeenCalled()
+  })
+
+  it("ignores a signal published by the current browser tab", () => {
+    const client = createTestQueryClient()
+    const invalidateQueries = vi.spyOn(client, "invalidateQueries")
+
+    applyClientInvalidation(
+      invalidation({ senderId: "same-tab" }),
+      SCOPE,
+      client,
+      undefined,
+      undefined,
+      undefined,
+      "same-tab",
+    )
 
     expect(invalidateQueries).not.toHaveBeenCalled()
   })
