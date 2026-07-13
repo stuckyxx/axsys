@@ -17,12 +17,7 @@ const MAX_JSON_NODES = 1_000
 let bffSql: Promise<Sql> | undefined
 
 type JsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | readonly JsonValue[]
-  | JsonObject
+  null | boolean | number | string | readonly JsonValue[] | JsonObject
 
 type JsonObject = Readonly<{ [key: string]: JsonValue }>
 type JsonGuardState = { readonly seen: WeakSet<object>; nodes: number }
@@ -39,7 +34,11 @@ function isJsonValue(
   state: JsonGuardState,
   depth: number,
 ): value is JsonValue {
-  if (value === null || typeof value === "string" || typeof value === "boolean") {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean"
+  ) {
     return true
   }
   if (typeof value === "number") return Number.isFinite(value)
@@ -58,10 +57,7 @@ function isJsonValue(
 
 function toJsonObject(metadata: Record<string, unknown>): JsonObject {
   const state: JsonGuardState = { seen: new WeakSet(), nodes: 0 }
-  if (
-    Array.isArray(metadata) ||
-    !isJsonValue(metadata, state, 0)
-  ) {
+  if (Array.isArray(metadata) || !isJsonValue(metadata, state, 0)) {
     throw new Error(BFF_METADATA_FAILURE)
   }
   return metadata
@@ -129,9 +125,7 @@ export type RateLimitDecision = {
 }
 
 type ImageUploadPurpose =
-  | "profile_avatar"
-  | "company_letterhead"
-  | "company_signature"
+  "profile_avatar" | "company_letterhead" | "company_signature"
 
 type UploadAuthorization = {
   uploadAuthorizationExpiresAt: string
@@ -223,10 +217,7 @@ export type CompanyDetailSnapshot = {
     mustChangePassword: boolean
     temporaryPasswordExpiresAt: string | null
     accessState:
-      | "active"
-      | "suspended"
-      | "password_change_required"
-      | "archived_company"
+      "active" | "suspended" | "password_change_required" | "archived_company"
   }>
   bankAccounts: Array<{
     id: string
@@ -316,10 +307,7 @@ export type PlatformAdminSnapshot = {
   mustChangePassword: boolean
   temporaryPasswordExpiresAt: string | null
   accessState:
-    | "active"
-    | "suspended"
-    | "password_change_required"
-    | "archived_company"
+    "active" | "suspended" | "password_change_required" | "archived_company"
 }
 
 export type PlatformDashboardSnapshot = {
@@ -382,7 +370,9 @@ const companyDetailSnapshotSchema = z
           ),
           version: z.int().positive(),
           mustChangePassword: z.boolean(),
-          temporaryPasswordExpiresAt: z.iso.datetime({ offset: true }).nullable(),
+          temporaryPasswordExpiresAt: z.iso
+            .datetime({ offset: true })
+            .nullable(),
           accessState: z.enum([
             "active",
             "suspended",
@@ -592,7 +582,10 @@ const companySettingsDraftPayloadSchema = z
     representativeDocumentIv: z.string().nullable(),
     representativeDocumentTag: z.string().nullable(),
     representativeDocumentKeyVersion: z.int().positive().nullable(),
-    representativeDocumentLast4: z.string().regex(/^\d{4}$/u).nullable(),
+    representativeDocumentLast4: z
+      .string()
+      .regex(/^\d{4}$/u)
+      .nullable(),
     taxRate: z.number().min(0).max(100),
     addressStreet: z.string().max(180).nullable(),
     addressNumber: z.string().max(30).nullable(),
@@ -600,7 +593,10 @@ const companySettingsDraftPayloadSchema = z
     addressNeighborhood: z.string().max(120).nullable(),
     addressCity: z.string().max(120).nullable(),
     addressState: z.string().length(2).nullable(),
-    addressPostalCode: z.string().regex(/^\d{8}$/u).nullable(),
+    addressPostalCode: z
+      .string()
+      .regex(/^\d{8}$/u)
+      .nullable(),
     letterheadFileId: z.uuid().nullable(),
     signatureFileId: z.uuid().nullable(),
   })
@@ -611,7 +607,10 @@ const companySettingsSnapshotSchema = z
     companyId: z.uuid(),
     representativeName: z.string().max(160).nullable(),
     representativeRole: z.string().max(120).nullable(),
-    maskedRepresentativeDocument: z.string().regex(/^••••\d{4}$/u).nullable(),
+    maskedRepresentativeDocument: z
+      .string()
+      .regex(/^••••\d{4}$/u)
+      .nullable(),
     taxRate: z.number().min(0).max(100),
     addressStreet: z.string().max(180).nullable(),
     addressNumber: z.string().max(30).nullable(),
@@ -619,7 +618,10 @@ const companySettingsSnapshotSchema = z
     addressNeighborhood: z.string().max(120).nullable(),
     addressCity: z.string().max(120).nullable(),
     addressState: z.string().length(2).nullable(),
-    addressPostalCode: z.string().regex(/^\d{8}$/u).nullable(),
+    addressPostalCode: z
+      .string()
+      .regex(/^\d{8}$/u)
+      .nullable(),
     consolidatedAddress: z.string().nullable(),
     letterheadFileId: z.uuid().nullable(),
     signatureFileId: z.uuid().nullable(),
@@ -639,9 +641,190 @@ const companySettingsDraftSnapshotSchema = z
   })
   .strict()
 
-export type CompanySettingsSnapshot = z.infer<typeof companySettingsSnapshotSchema>
-export type CompanySettingsDraftPayload = z.infer<typeof companySettingsDraftPayloadSchema>
-export type CompanySettingsDraftSnapshot = z.infer<typeof companySettingsDraftSnapshotSchema>
+export type CompanySettingsSnapshot = z.infer<
+  typeof companySettingsSnapshotSchema
+>
+export type CompanySettingsDraftPayload = z.infer<
+  typeof companySettingsDraftPayloadSchema
+>
+export type CompanySettingsDraftSnapshot = z.infer<
+  typeof companySettingsDraftSnapshotSchema
+>
+
+const administrativeTimestampSchema = z.iso.datetime({ offset: true })
+const moneyStringSchema = z.string().regex(/^\d+(?:\.\d{2})$/u)
+const clientMutationRecordSchema = z
+  .object({
+    id: z.uuid(),
+    legalName: z.string(),
+    tradeName: z.string().nullable(),
+    cnpj: z.string().regex(/^\d{14}$/u),
+    segment: z.string(),
+    email: z.string().nullable(),
+    phone: z.string().nullable(),
+    address: z
+      .object({
+        street: z.string().nullable(),
+        number: z.string().nullable(),
+        complement: z.string().nullable(),
+        neighborhood: z.string().nullable(),
+        municipality: z.string(),
+        state: z.string().length(2),
+        postalCode: z.string().nullable(),
+      })
+      .strict(),
+    archivedAt: administrativeTimestampSchema.nullable(),
+    version: z.int().positive(),
+    createdAt: administrativeTimestampSchema,
+    updatedAt: administrativeTimestampSchema,
+  })
+  .strict()
+const catalogMutationRecordSchema = z
+  .object({
+    id: z.uuid(),
+    itemKind: z.enum(["service", "product"]),
+    segment: z.string(),
+    name: z.string(),
+    description: z.string(),
+    archivedAt: administrativeTimestampSchema.nullable(),
+    version: z.int().positive(),
+    createdAt: administrativeTimestampSchema,
+    updatedAt: administrativeTimestampSchema,
+  })
+  .strict()
+const proposalMutationRecordSchema = z
+  .object({
+    id: z.uuid(),
+    clientId: z.uuid(),
+    segment: z.string(),
+    number: z.int().positive(),
+    issuedOn: z.iso.date(),
+    status: z.enum(["draft", "sent", "approved", "rejected"]),
+    total: moneyStringSchema,
+    sentAt: administrativeTimestampSchema.nullable(),
+    version: z.int().positive(),
+    createdAt: administrativeTimestampSchema,
+    updatedAt: administrativeTimestampSchema,
+  })
+  .strict()
+const proposalItemMutationRecordSchema = z
+  .object({
+    id: z.uuid(),
+    catalogItemId: z.uuid(),
+    itemKind: z.enum(["service", "product"]),
+    position: z.int().positive(),
+    description: z.string(),
+    months: z.int().positive().nullable(),
+    monthlyAmount: moneyStringSchema.nullable(),
+    quantity: z.string().nullable(),
+    unitAmount: moneyStringSchema.nullable(),
+    lineTotal: moneyStringSchema,
+  })
+  .strict()
+const proposalWithItemsMutationRecordSchema = z
+  .object({
+    proposal: proposalMutationRecordSchema,
+    items: z.array(proposalItemMutationRecordSchema),
+  })
+  .strict()
+const contractMutationRecordSchema = z
+  .object({
+    id: z.uuid(),
+    clientId: z.uuid(),
+    number: z.string(),
+    object: z.string(),
+    startsOn: z.iso.date(),
+    endsOn: z.iso.date(),
+    amount: moneyStringSchema,
+    closedAt: administrativeTimestampSchema.nullable(),
+    closeReason: z.string().nullable(),
+    version: z.int().positive(),
+    createdAt: administrativeTimestampSchema,
+    updatedAt: administrativeTimestampSchema,
+  })
+  .strict()
+const attachmentMutationRecordSchema = z
+  .object({
+    id: z.uuid(),
+    contractId: z.uuid(),
+    fileObjectId: z.uuid(),
+    attachmentGroupId: z.uuid(),
+    version: z.int().positive(),
+    originalName: z.string(),
+    mime: z.string(),
+    byteSize: z.int().positive(),
+    isCurrent: z.boolean(),
+    createdAt: administrativeTimestampSchema,
+  })
+  .strict()
+const clientMutationSchema = z
+  .object({
+    record: clientMutationRecordSchema,
+    scopes: z.tuple([
+      z.literal("clients"),
+      z.literal("proposals"),
+      z.literal("contracts"),
+      z.literal("dashboard"),
+    ]),
+  })
+  .strict()
+const catalogMutationSchema = z
+  .object({
+    record: catalogMutationRecordSchema,
+    scopes: z.tuple([z.literal("catalog"), z.literal("proposals")]),
+  })
+  .strict()
+const proposalMutationSchema = z
+  .object({
+    record: proposalMutationRecordSchema,
+    scopes: z.tuple([z.literal("proposals"), z.literal("dashboard")]),
+  })
+  .strict()
+const proposalWithItemsMutationSchema = z
+  .object({
+    record: proposalWithItemsMutationRecordSchema,
+    scopes: z.tuple([z.literal("proposals"), z.literal("dashboard")]),
+  })
+  .strict()
+const contractCreateMutationSchema = z
+  .object({
+    record: contractMutationRecordSchema,
+    scopes: z.tuple([
+      z.literal("contracts"),
+      z.literal("notifications"),
+      z.literal("dashboard"),
+    ]),
+  })
+  .strict()
+const contractMutationSchema = z
+  .object({
+    record: contractMutationRecordSchema,
+    scopes: z.tuple([
+      z.literal("contracts"),
+      z.literal("notifications"),
+      z.literal("dashboard"),
+      z.literal("payments"),
+    ]),
+  })
+  .strict()
+const attachmentMutationSchema = z
+  .object({
+    record: attachmentMutationRecordSchema,
+    scopes: z.tuple([z.literal("contracts"), z.literal("storage")]),
+  })
+  .strict()
+const clientDeleteMutationSchema = clientMutationSchema
+  .extend({ record: z.null() })
+  .strict()
+const catalogDeleteMutationSchema = catalogMutationSchema
+  .extend({ record: z.null() })
+  .strict()
+const proposalDeleteMutationSchema = proposalMutationSchema
+  .extend({ record: z.null() })
+  .strict()
+const contractDeleteMutationSchema = contractMutationSchema
+  .extend({ record: z.null() })
+  .strict()
 
 export const bffDb = {
   async consumeRateLimit(input: {
@@ -1170,13 +1353,15 @@ export const bffDb = {
   }): Promise<UploadAuthorizationRetirementCompletion> {
     const sql = await getSql()
     const [row] = await sql<
-      [{
-        intentId: string
-        status: RetirementStatus
-        releasedBytes: number | string
-        version: number | string
-        authorizationRetiredAt: Date
-      }]
+      [
+        {
+          intentId: string
+          status: RetirementStatus
+          releasedBytes: number | string
+          version: number | string
+          authorizationRetiredAt: Date
+        },
+      ]
     >`
       select intent_id as "intentId",
              status,
@@ -1217,9 +1402,11 @@ export const bffDb = {
     const sql = await getSql()
     if (input.signal.aborted) throw new Error(BFF_DATABASE_FAILURE)
     const query = sql<
-      [(Omit<ImageDownloadAuthorization, "byteSize"> & {
-        byteSize: number | string
-      })]
+      [
+        Omit<ImageDownloadAuthorization, "byteSize"> & {
+          byteSize: number | string
+        },
+      ]
     >`
       select file_id as "fileId",
              company_id as "companyId",
@@ -1417,15 +1604,17 @@ export const bffDb = {
     reconciliationId: string
   }> {
     const sql = await getSql()
-    const [row] = await sql<[
-      {
-        result: {
-          company: ManagedCompanySnapshot
-          affectedUserIds: string[]
-          reconciliationId: string
-        }
-      },
-    ]>`
+    const [row] = await sql<
+      [
+        {
+          result: {
+            company: ManagedCompanySnapshot
+            affectedUserIds: string[]
+            reconciliationId: string
+          }
+        },
+      ]
+    >`
       select private.internal_set_company_status(
         ${input.actorUserId}::uuid,
         ${input.sessionId}::uuid,
@@ -1464,14 +1653,16 @@ export const bffDb = {
     nextCursor: { createdAt: string; id: string } | null
   }> {
     const sql = await getSql()
-    const [row] = await sql<[
-      {
-        result: {
-          items: CompanyListSnapshot[]
-          nextCursor: { createdAt: string; id: string } | null
-        }
-      },
-    ]>`
+    const [row] = await sql<
+      [
+        {
+          result: {
+            items: CompanyListSnapshot[]
+            nextCursor: { createdAt: string; id: string } | null
+          }
+        },
+      ]
+    >`
       select private.internal_list_companies(
         ${input.actorUserId}::uuid,
         ${input.sessionId}::uuid,
@@ -1533,17 +1724,19 @@ export const bffDb = {
     updatedAt: string
   }> {
     const sql = await getSql()
-    const [row] = await sql<[
-      {
-        result: {
-          reconciliationId: string
-          status: "complete" | "pending"
-          failedUserIds: string[]
-          attemptCount: number
-          updatedAt: string
-        }
-      },
-    ]>`
+    const [row] = await sql<
+      [
+        {
+          result: {
+            reconciliationId: string
+            status: "complete" | "pending"
+            failedUserIds: string[]
+            attemptCount: number
+            updatedAt: string
+          }
+        },
+      ]
+    >`
       select private.internal_complete_company_access_reconciliation(
         ${input.actorUserId}::uuid,
         ${input.sessionId}::uuid,
@@ -1779,11 +1972,21 @@ export const bffDb = {
     bankName: string
     branch: { ciphertext: string; iv: string; tag: string; keyVersion: number }
     branchLast4: string
-    account: { ciphertext: string; iv: string; tag: string; keyVersion: number }
+    account: {
+      ciphertext: string
+      iv: string
+      tag: string
+      keyVersion: number
+    }
     accountLast4: string
     accountType: "checking" | "savings" | "payment"
     holderName: string
-    holderDocument: { ciphertext: string; iv: string; tag: string; keyVersion: number } | null
+    holderDocument: {
+      ciphertext: string
+      iv: string
+      tag: string
+      keyVersion: number
+    } | null
     holderDocumentLast4: string | null
     makeDefault: boolean
     expectedVersion: number | null
@@ -2157,5 +2360,282 @@ export const bffDb = {
       throw new Error(BFF_DATABASE_FAILURE)
     }
     return row.result
+  },
+
+  async createClient(input: {
+    actorUserId: string
+    sessionId: string
+    input: Record<string, unknown>
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const payload = toJsonObject(input.input)
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.create_client(${input.actorUserId}::uuid,${input.sessionId}::uuid,${sql.json(payload)}::jsonb,${input.correlationId}::uuid) as result`
+    return clientMutationSchema.parse(row?.result)
+  },
+  async updateClient(input: {
+    actorUserId: string
+    sessionId: string
+    clientId: string
+    expectedVersion: number
+    input: Record<string, unknown>
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const payload = toJsonObject(input.input)
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.update_client(${input.actorUserId}::uuid,${input.sessionId}::uuid,${input.clientId}::uuid,${input.expectedVersion}::bigint,${sql.json(payload)}::jsonb,${input.correlationId}::uuid) as result`
+    return clientMutationSchema.parse(row?.result)
+  },
+  async archiveClient(input: {
+    actorUserId: string
+    sessionId: string
+    clientId: string
+    expectedVersion: number
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.archive_client(${input.actorUserId}::uuid,${input.sessionId}::uuid,${input.clientId}::uuid,${input.expectedVersion}::bigint,${input.correlationId}::uuid) as result`
+    return clientMutationSchema.parse(row?.result)
+  },
+  async restoreClient(input: {
+    actorUserId: string
+    sessionId: string
+    clientId: string
+    expectedVersion: number
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.restore_client(${input.actorUserId}::uuid,${input.sessionId}::uuid,${input.clientId}::uuid,${input.expectedVersion}::bigint,${input.correlationId}::uuid) as result`
+    return clientMutationSchema.parse(row?.result)
+  },
+  async deleteClient(input: {
+    actorUserId: string
+    sessionId: string
+    clientId: string
+    expectedVersion: number
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.delete_client(${input.actorUserId}::uuid,${input.sessionId}::uuid,${input.clientId}::uuid,${input.expectedVersion}::bigint,${input.correlationId}::uuid) as result`
+    return clientDeleteMutationSchema.parse(row?.result)
+  },
+  async createCatalogItem(input: {
+    actorUserId: string
+    sessionId: string
+    input: Record<string, unknown>
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const payload = toJsonObject(input.input)
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.create_catalog_item(${input.actorUserId}::uuid,${input.sessionId}::uuid,${sql.json(payload)}::jsonb,${input.correlationId}::uuid) as result`
+    return catalogMutationSchema.parse(row?.result)
+  },
+  async updateCatalogItem(input: {
+    actorUserId: string
+    sessionId: string
+    itemId: string
+    expectedVersion: number
+    input: Record<string, unknown>
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const payload = toJsonObject(input.input)
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.update_catalog_item(${input.actorUserId}::uuid,${input.sessionId}::uuid,${input.itemId}::uuid,${input.expectedVersion}::bigint,${sql.json(payload)}::jsonb,${input.correlationId}::uuid) as result`
+    return catalogMutationSchema.parse(row?.result)
+  },
+  async archiveCatalogItem(input: {
+    actorUserId: string
+    sessionId: string
+    itemId: string
+    expectedVersion: number
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.archive_catalog_item(${input.actorUserId}::uuid,${input.sessionId}::uuid,${input.itemId}::uuid,${input.expectedVersion}::bigint,${input.correlationId}::uuid) as result`
+    return catalogMutationSchema.parse(row?.result)
+  },
+  async restoreCatalogItem(input: {
+    actorUserId: string
+    sessionId: string
+    itemId: string
+    expectedVersion: number
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.restore_catalog_item(${input.actorUserId}::uuid,${input.sessionId}::uuid,${input.itemId}::uuid,${input.expectedVersion}::bigint,${input.correlationId}::uuid) as result`
+    return catalogMutationSchema.parse(row?.result)
+  },
+  async deleteCatalogItem(input: {
+    actorUserId: string
+    sessionId: string
+    itemId: string
+    expectedVersion: number
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.delete_catalog_item(${input.actorUserId}::uuid,${input.sessionId}::uuid,${input.itemId}::uuid,${input.expectedVersion}::bigint,${input.correlationId}::uuid) as result`
+    return catalogDeleteMutationSchema.parse(row?.result)
+  },
+  async createProposal(input: {
+    actorUserId: string
+    sessionId: string
+    clientId: string
+    segment: string
+    issuedOn: string
+    items: readonly Record<string, unknown>[]
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const items = input.items.map((item) => toJsonObject(item))
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.create_proposal(${input.actorUserId}::uuid,${input.sessionId}::uuid,${input.clientId}::uuid,${input.segment},${input.issuedOn}::date,${sql.json(items)}::jsonb,${input.correlationId}::uuid) as result`
+    return proposalWithItemsMutationSchema.parse(row?.result)
+  },
+  async updateDraftProposal(input: {
+    actorUserId: string
+    sessionId: string
+    proposalId: string
+    expectedVersion: number
+    input: Record<string, unknown>
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const payload = toJsonObject(input.input)
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.update_draft_proposal(${input.actorUserId}::uuid,${input.sessionId}::uuid,${input.proposalId}::uuid,${input.expectedVersion}::bigint,${sql.json(payload)}::jsonb,${input.correlationId}::uuid) as result`
+    return proposalMutationSchema.parse(row?.result)
+  },
+  async saveProposalItems(input: {
+    actorUserId: string
+    sessionId: string
+    proposalId: string
+    expectedVersion: number
+    items: readonly Record<string, unknown>[]
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const items = input.items.map((item) => toJsonObject(item))
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.save_proposal_items(${input.actorUserId}::uuid,${input.sessionId}::uuid,${input.proposalId}::uuid,${input.expectedVersion}::bigint,${sql.json(items)}::jsonb,${input.correlationId}::uuid) as result`
+    return proposalWithItemsMutationSchema.parse(row?.result)
+  },
+  async transitionProposalStatus(input: {
+    actorUserId: string
+    sessionId: string
+    proposalId: string
+    expectedVersion: number
+    nextStatus: "draft" | "sent" | "approved" | "rejected"
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.transition_proposal_status(${input.actorUserId}::uuid,${input.sessionId}::uuid,${input.proposalId}::uuid,${input.expectedVersion}::bigint,${input.nextStatus}::public.proposal_status,${input.correlationId}::uuid) as result`
+    return proposalMutationSchema.parse(row?.result)
+  },
+  async deleteDraftProposal(input: {
+    actorUserId: string
+    sessionId: string
+    proposalId: string
+    expectedVersion: number
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.delete_draft_proposal(${input.actorUserId}::uuid,${input.sessionId}::uuid,${input.proposalId}::uuid,${input.expectedVersion}::bigint,${input.correlationId}::uuid) as result`
+    return proposalDeleteMutationSchema.parse(row?.result)
+  },
+  async createContract(input: {
+    actorUserId: string
+    sessionId: string
+    input: Record<string, unknown>
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const payload = toJsonObject(input.input)
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.create_contract(${input.actorUserId}::uuid,${input.sessionId}::uuid,${sql.json(payload)}::jsonb,${input.correlationId}::uuid) as result`
+    return contractCreateMutationSchema.parse(row?.result)
+  },
+  async updateContract(input: {
+    actorUserId: string
+    sessionId: string
+    contractId: string
+    expectedVersion: number
+    input: Record<string, unknown>
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const payload = toJsonObject(input.input)
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.update_contract(${input.actorUserId}::uuid,${input.sessionId}::uuid,${input.contractId}::uuid,${input.expectedVersion}::bigint,${sql.json(payload)}::jsonb,${input.correlationId}::uuid) as result`
+    return contractMutationSchema.parse(row?.result)
+  },
+  async closeContract(input: {
+    actorUserId: string
+    sessionId: string
+    contractId: string
+    expectedVersion: number
+    reason: string
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.close_contract(${input.actorUserId}::uuid,${input.sessionId}::uuid,${input.contractId}::uuid,${input.expectedVersion}::bigint,${input.reason},${input.correlationId}::uuid) as result`
+    return contractMutationSchema.parse(row?.result)
+  },
+  async deleteContract(input: {
+    actorUserId: string
+    sessionId: string
+    contractId: string
+    expectedVersion: number
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.delete_contract(${input.actorUserId}::uuid,${input.sessionId}::uuid,${input.contractId}::uuid,${input.expectedVersion}::bigint,${input.correlationId}::uuid) as result`
+    return contractDeleteMutationSchema.parse(row?.result)
+  },
+  async versionContractAttachment(input: {
+    actorUserId: string
+    sessionId: string
+    contractId: string
+    fileId: string
+    attachmentGroupId: string | null
+    correlationId: string
+  }) {
+    const sql = await getSql()
+    const [row] = await sql<
+      [{ result: unknown }]
+    >`select private.version_contract_attachment(${input.actorUserId}::uuid,${input.sessionId}::uuid,${input.contractId}::uuid,${input.fileId}::uuid,${input.attachmentGroupId}::uuid,${input.correlationId}::uuid) as result`
+    return attachmentMutationSchema.parse(row?.result)
   },
 }
