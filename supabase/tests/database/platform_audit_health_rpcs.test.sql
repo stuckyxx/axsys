@@ -178,8 +178,8 @@ select is(
      join pg_namespace namespace on namespace.oid=function.pronamespace
     where namespace.nspname='private'
       and has_function_privilege('axsys_bff',function.oid,'EXECUTE')),
-  55,
-  'the four platform read facades extend the existing 51-boundary catalog to 55'
+  64,
+  'the platform read facades remain present in the exact Task11 catalog of 64'
 );
 
 select is_empty(

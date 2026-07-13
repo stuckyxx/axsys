@@ -66,6 +66,26 @@ function fixture(overrides: Record<string, unknown> = {}) {
 }
 
 describe("authorized file download", () => {
+  it("rejects branding download for a member outside settings modules", async () => {
+    const deps = fixture({
+      purpose: "company_letterhead",
+      ownerUserId: null,
+      objectPath: `${companyId}/company_letterhead/${fileId}.webp`,
+    })
+    const certificatesOnly = {
+      ...context,
+      role: "member" as const,
+      modules: ["certificates"] as const,
+    }
+
+    await expect(createAuthorizedDownload(deps, {
+      context: certificatesOnly,
+      fileId,
+      correlationId: randomUUID(),
+    })).rejects.toMatchObject({ code: "FILE_NOT_FOUND", status: 404 })
+    expect(deps.storage.downloadPrivate).not.toHaveBeenCalled()
+  })
+
   it("derives authorization from actor/session and never returns a Storage URL", async () => {
     const deps = fixture()
 

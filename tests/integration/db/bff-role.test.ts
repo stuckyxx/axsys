@@ -749,7 +749,7 @@ describe("axsys_bff", () => {
     ])
   })
 
-  it("has EXECUTE on all and only the fifty-five allowlisted boundaries", async () => {
+  it("has EXECUTE on all and only the sixty-four allowlisted boundaries", async () => {
     const routines = await postgresOwnerSql<{ routineName: string }[]>`
       select function.proname as "routineName"
       from pg_proc function
@@ -779,15 +779,20 @@ describe("axsys_bff", () => {
       "fail_password_recovery",
       "fail_temporary_password_reset",
       "internal_archive_bank_account",
+      "internal_attach_own_avatar",
       "internal_begin_file_finalization",
       "internal_commit_company_admin_provisioning",
       "internal_commit_company_provisioning",
       "internal_complete_company_access_reconciliation",
       "internal_complete_member_auth_access_reconciliation",
+      "internal_delete_own_company_settings_draft",
       "internal_finalize_file_upload",
       "internal_find_provisioning_auth_user",
       "internal_get_company_detail",
       "internal_get_company_user",
+      "internal_get_own_company_settings",
+      "internal_get_own_company_settings_draft",
+      "internal_get_own_profile",
       "internal_get_platform_company_admin",
       "internal_get_platform_dashboard",
       "internal_get_platform_health",
@@ -805,8 +810,12 @@ describe("axsys_bff", () => {
       "internal_reserve_company_provisioning",
       "internal_set_company_status",
       "internal_set_default_bank_account",
+      "internal_sync_confirmed_profile_email",
       "internal_update_company",
+      "internal_update_own_company_settings",
+      "internal_update_own_profile",
       "internal_upsert_bank_account",
+      "internal_upsert_own_company_settings_draft",
       "list_company_user_directory",
       "register_auth_session",
       "release_upload_authorization_retirement_claim",

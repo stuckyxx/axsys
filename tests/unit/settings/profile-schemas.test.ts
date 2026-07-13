@@ -10,17 +10,22 @@ describe("profile schemas", () => {
     expect(
       profileUpdateSchema.parse({
         displayName: "  Maria Administradora  ",
-        email: "  MARIA@EXAMPLE.COM ",
         version: 4,
       }),
     ).toEqual({
       displayName: "Maria Administradora",
-      email: "maria@example.com",
       version: 4,
     })
   })
 
   it("rejects protected authorization fields and unsafe versions", () => {
+    expect(() =>
+      profileUpdateSchema.parse({
+        displayName: "Maria",
+        email: "maria@example.com",
+        version: 1,
+      }),
+    ).toThrow()
     expect(() =>
       profileUpdateSchema.parse({
         displayName: "Maria",

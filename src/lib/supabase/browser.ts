@@ -49,7 +49,6 @@ export function getBrowserRealtime(): BrowserRealtimeCapability {
         autoRefreshToken: false,
         detectSessionInUrl: false,
       },
-      accessToken: getRealtimeAccessToken,
     },
   )
 
@@ -63,7 +62,7 @@ export function getBrowserRealtime(): BrowserRealtimeCapability {
       }
     },
     async refreshAuth() {
-      await client.realtime.setAuth()
+      await client.realtime.setAuth(await getRealtimeAccessToken())
     },
     removeChannel: client.removeChannel.bind(client),
   })

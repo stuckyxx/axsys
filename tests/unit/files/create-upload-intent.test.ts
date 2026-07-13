@@ -65,6 +65,23 @@ const input = {
 }
 
 describe("createUploadIntent", () => {
+  it("bloqueia branding para membro sem módulo administrativo antes da reserva", async () => {
+    const { deps } = createDeps()
+    const financialMember = {
+      ...companyContext,
+      role: "member" as const,
+      modules: ["financial"] as const,
+    }
+
+    await expect(createUploadIntent(deps, {
+      ...input,
+      context: financialMember,
+      purpose: "company_letterhead",
+      declaredName: "timbrado.png",
+    })).rejects.toMatchObject({ code: "FILE_FORBIDDEN", status: 403 })
+    expect(deps.repository.reserveImageUploadIntent).not.toHaveBeenCalled()
+  })
+
   it("ativa a autorização no banco antes de assinar qualquer capability", async () => {
     const { deps, calls } = createDeps()
 

@@ -18,6 +18,10 @@ const mocks = vi.hoisted(() => ({
   finalizationStorage: Object.freeze({}),
   downloadStorage: Object.freeze({}),
   scanner: Object.freeze({}),
+  requireRecent: vi.fn(),
+}))
+vi.mock("@/modules/auth/server/guards", () => ({
+  requireRecentAuthentication: mocks.requireRecent,
 }))
 
 vi.mock("@/modules/files/server/file-route-security", () => ({
@@ -77,6 +81,20 @@ beforeEach(() => {
 })
 
 describe("file upload route handlers", () => {
+  it("requires recent authentication for institutional branding uploads", async () => {
+    mocks.create.mockResolvedValue({ ok: true })
+    const response = await createUpload(new Request("https://axsys.test/api/files/uploads", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        purpose: "company_letterhead", targetResourceId: null,
+        declaredName: "timbrado.png", declaredMime: "image/png", declaredSize: 1024,
+      }),
+    }))
+    expect(response.status).toBe(201)
+    expect(mocks.requireRecent).toHaveBeenCalledWith(context, 600)
+  })
+
   it("returns a no-store handshake without accepting tenant or path fields", async () => {
     const handshake = {
       intentId,

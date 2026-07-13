@@ -50,11 +50,15 @@ select results_eq(
       ('complete_upload_authorization_retirement'),('consume_rate_limit'),
       ('fail_closed_login_session'),('fail_password_recovery'),
       ('fail_temporary_password_reset'),('internal_archive_bank_account'),
+      ('internal_attach_own_avatar'),
       ('internal_begin_file_finalization'),
       ('internal_commit_company_admin_provisioning'),('internal_commit_company_provisioning'),
       ('internal_complete_member_auth_access_reconciliation'),
+      ('internal_delete_own_company_settings_draft'),
       ('internal_complete_company_access_reconciliation'),('internal_finalize_file_upload'),
       ('internal_get_company_detail'),('internal_get_company_user'),
+      ('internal_get_own_company_settings'),('internal_get_own_company_settings_draft'),
+      ('internal_get_own_profile'),
       ('internal_get_platform_company_admin'),('internal_get_platform_dashboard'),
       ('internal_get_platform_health'),
       ('internal_list_companies'),
@@ -66,14 +70,17 @@ select results_eq(
       ('internal_reject_file_upload'),('internal_release_file_finalization_for_retry'),
       ('internal_reserve_company_admin_provisioning'),('internal_reserve_company_provisioning'),
       ('internal_set_company_status'),('internal_set_default_bank_account'),
-      ('internal_update_company'),('internal_upsert_bank_account'),
+      ('internal_sync_confirmed_profile_email'),
+      ('internal_update_company'),('internal_update_own_company_settings'),
+      ('internal_update_own_profile'),('internal_upsert_bank_account'),
+      ('internal_upsert_own_company_settings_draft'),
       ('list_company_user_directory'),
       ('register_auth_session'),('release_upload_authorization_retirement_claim'),
       ('reserve_image_upload_intent'),('revoke_sessions_and_write_logout'),
       ('rotate_app_session_after_reauthentication'),('write_authenticated_audit_event'),
       ('write_security_event')
   ) names(expected) order by expected$$,
-  'BFF catalog contains exactly 55 purpose-specific boundaries'
+  'BFF catalog contains exactly 64 purpose-specific boundaries'
 );
 
 select is_empty(

@@ -192,6 +192,14 @@ export async function createUploadIntent(
   deps: CreateUploadIntentDependencies,
   input: CreateUploadIntentInput,
 ): Promise<UploadHandshake> {
+  if (
+    (input.purpose === "company_letterhead" ||
+      input.purpose === "company_signature") &&
+    input.context.role !== "company_admin" &&
+    !input.context.modules.includes("administrative")
+  ) {
+    throw uploadError("FILE_FORBIDDEN", 403, "Operação não autorizada.")
+  }
   const policy = getUploadPolicy(input.purpose)
   validateDeclaration(input, policy.maxBytes, policy.declaredMimeTypes)
 

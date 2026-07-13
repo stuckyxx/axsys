@@ -85,9 +85,10 @@ export const companySettingsDraftSchema = z
 
 export const companySettingsDtoSchema = z
   .object({
+    companyId: z.uuid(),
     representativeName: z.string().nullable(),
     representativeRole: z.string().nullable(),
-    representativeDocumentLast4: z.string().regex(/^\d{4}$/u).nullable(),
+    maskedRepresentativeDocument: z.string().regex(/^••••\d{4}$/u).nullable(),
     taxRate: z.number().min(0).max(100),
     addressStreet: z.string().nullable(),
     addressNumber: z.string().nullable(),
@@ -101,8 +102,21 @@ export const companySettingsDtoSchema = z
     signatureFileId: z.uuid().nullable(),
     version: z.int().positive(),
     updatedAt: z.iso.datetime(),
+    canEdit: z.boolean(),
+    banks: z.array(z.object({
+      id: z.uuid(), companyId: z.uuid(), bankCode: z.string(), bankName: z.string(),
+      maskedBranch: z.string(), maskedAccount: z.string(),
+      accountType: z.enum(["checking", "savings", "payment"]), holderName: z.string(),
+      maskedHolderDocument: z.string().nullable(), status: z.literal("active"),
+      isDefault: z.boolean(), version: z.int().positive(),
+      createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(),
+    }).strict()),
   })
   .strict()
+
+export const companySettingsDraftRequestSchema = companySettingsDraftSchema.extend({
+  expectedDraftVersion: z.int().positive().nullable(),
+}).strict()
 
 export type CompanySettingsInput = z.infer<typeof companySettingsSchema>
 export type CompanySettingsDraftInput = z.infer<

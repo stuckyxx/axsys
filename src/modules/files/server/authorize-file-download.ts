@@ -92,7 +92,10 @@ function hasValidAuthorization(
     value.purpose === "profile_avatar"
       ? value.ownerUserId !== null &&
         (value.ownerUserId === context.userId || context.role === "company_admin")
-      : value.ownerUserId === null
+      : value.ownerUserId === null &&
+        (context.role === "company_admin" ||
+          context.modules.includes("administrative") ||
+          context.modules.includes("financial"))
   return (
     value.fileId === fileId &&
     value.companyId === context.companyId &&

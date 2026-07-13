@@ -286,6 +286,7 @@ test("mobile admin navigation exposes management independently from operational 
   await page.getByRole("button", { name: "Abrir menu" }).click()
 
   const dialog = page.getByRole("dialog")
+  await expect(dialog).toBeVisible()
   const navigation = dialog.getByRole("navigation", {
     name: "Menu móvel da empresa",
   })

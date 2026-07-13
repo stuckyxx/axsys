@@ -70,6 +70,21 @@ export async function requirePlatformApiContext() {
   return resolution.context
 }
 
+export async function requireAccessApiContext(): Promise<AccessContext> {
+  const resolution = await getAccessContext()
+  if (resolution.status === "anonymous") {
+    throw new ApiError("AUTH_REQUIRED", 401, "Faça login para continuar.")
+  }
+  if (resolution.status === "password_change") {
+    throw new ApiError(
+      "PASSWORD_CHANGE_REQUIRED",
+      403,
+      "Altere sua senha provisória para continuar.",
+    )
+  }
+  return resolution.context
+}
+
 export async function requireCompanyContext(requiredModule?: ModuleKey) {
   const context = await requireAccessContext()
   if (context.kind === "platform") {

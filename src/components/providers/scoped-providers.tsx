@@ -14,6 +14,7 @@ import { useSessionWatchdog } from "@/lib/query/session-watchdog"
 import { settleRealtimeCleanup } from "@/lib/realtime/realtime-lifecycle"
 import { getBrowserRealtime } from "@/lib/supabase/browser"
 import type { ThemePreference } from "@/modules/auth/domain/access-context"
+import { COMPANY_SETTINGS_INVALIDATED_EVENT } from "@/modules/settings/ui/company-settings-events"
 
 type ScopedProvidersProps = Readonly<{
   children: ReactNode
@@ -100,6 +101,27 @@ function ScopedSignalBridge({
       window.removeEventListener(
         PROFILE_THEME_INVALIDATED_EVENT,
         publishProfileSignal,
+      )
+    }
+  }, [scope, senderId])
+
+  useEffect(() => {
+    const publishCompanySettingsSignal = () => {
+      publishInvalidation({
+        resources: ["company-settings"],
+        scope,
+        senderId,
+        type: "invalidate",
+      })
+    }
+    window.addEventListener(
+      COMPANY_SETTINGS_INVALIDATED_EVENT,
+      publishCompanySettingsSignal,
+    )
+    return () => {
+      window.removeEventListener(
+        COMPANY_SETTINGS_INVALIDATED_EVENT,
+        publishCompanySettingsSignal,
       )
     }
   }, [scope, senderId])

@@ -9,6 +9,7 @@ import {
   getUploadCapabilityStorage,
 } from "@/modules/files/server/file-storage"
 import { authorizeFileMutation } from "@/modules/files/server/file-route-security"
+import { requireRecentAuthentication } from "@/modules/auth/server/guards"
 
 const createUploadSchema = z
   .object({
@@ -29,6 +30,12 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const context = await authorizeFileMutation(request)
     const input = createUploadSchema.parse(await request.json())
+    if (
+      input.purpose === "company_letterhead" ||
+      input.purpose === "company_signature"
+    ) {
+      requireRecentAuthentication(context, 600)
+    }
     const handshake = await createUploadIntent(
       {
         repository: getFileRepository(),

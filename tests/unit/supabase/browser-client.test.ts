@@ -51,12 +51,9 @@ describe("browser Supabase capability", () => {
     }))
     let clientIndex = 0
     createClientMock.mockImplementation(
-      (_url: string, _key: string, options: { accessToken: () => Promise<string> }) => {
+      () => {
         const client = rawClients[clientIndex]
         clientIndex += 1
-        client.realtime.setAuth.mockImplementation(async () => {
-          await options.accessToken()
-        })
         return client
       },
     )
@@ -97,11 +94,12 @@ describe("browser Supabase capability", () => {
       autoRefreshToken: false,
       detectSessionInUrl: false,
     })
-    await expect(options.accessToken()).resolves.toBe("realtime-access-token-1")
-    await expect(options.accessToken()).resolves.toBe("realtime-access-token-2")
+    expect(options).not.toHaveProperty("accessToken")
     await first.refreshAuth()
-    expect(rawClients[0].realtime.setAuth).toHaveBeenCalledWith()
-    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/auth/realtime-token", {
+    expect(rawClients[0].realtime.setAuth).toHaveBeenCalledWith(
+      "realtime-access-token-1",
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/auth/realtime-token", {
       credentials: "same-origin",
       cache: "no-store",
     })
@@ -123,13 +121,14 @@ describe("browser Supabase capability", () => {
     createClientMock.mockReturnValue({
       channel: vi.fn(),
       removeChannel: vi.fn(),
+      realtime: { setAuth: vi.fn() },
     })
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response))
     const { getBrowserRealtime } = await import("@/lib/supabase/browser")
     getBrowserRealtime()
-    const options = createClientMock.mock.calls[0][2]
+    const realtime = getBrowserRealtime()
 
-    await expect(options.accessToken()).rejects.toThrow(
+    await expect(realtime.refreshAuth()).rejects.toThrow(
       "Realtime authorization failed",
     )
   })

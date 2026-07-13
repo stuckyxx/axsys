@@ -9,13 +9,11 @@ const displayNameSchema = z
     message: "O nome contém caracteres inválidos.",
   })
 
-const profileEmailSchema = z.string().trim().toLowerCase().email().max(254)
 const profileVersionSchema = z.int().positive()
 
 export const profileUpdateSchema = z
   .object({
     displayName: displayNameSchema,
-    email: profileEmailSchema.optional(),
     version: profileVersionSchema,
   })
   .strict()

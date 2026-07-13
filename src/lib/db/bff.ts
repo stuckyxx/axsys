@@ -335,6 +335,15 @@ export type PlatformDashboardSnapshot = {
   pendingMemberAccessReconciliations: number
 }
 
+export type OwnProfileSnapshot = {
+  userId: string
+  email: string
+  displayName: string
+  preferredTheme: "dark" | "light"
+  avatarFileId: string | null
+  version: number
+}
+
 const companyListSnapshotSchema = z
   .object({
     id: z.uuid(),
@@ -562,6 +571,77 @@ const platformDashboardSnapshotSchema = z
     pendingMemberAccessReconciliations: z.int().nonnegative(),
   })
   .strict()
+
+const ownProfileSnapshotSchema = z
+  .object({
+    userId: z.uuid(),
+    email: z.email().max(254),
+    displayName: z.string().min(2).max(120),
+    preferredTheme: z.enum(["dark", "light"]),
+    avatarFileId: z.uuid().nullable(),
+    version: z.int().positive(),
+  })
+  .strict()
+
+const companySettingsDraftPayloadSchema = z
+  .object({
+    representativeName: z.string().max(160).nullable(),
+    representativeRole: z.string().max(120).nullable(),
+    representativeDocumentAction: z.enum(["preserve", "replace", "clear"]),
+    representativeDocumentCiphertext: z.string().nullable(),
+    representativeDocumentIv: z.string().nullable(),
+    representativeDocumentTag: z.string().nullable(),
+    representativeDocumentKeyVersion: z.int().positive().nullable(),
+    representativeDocumentLast4: z.string().regex(/^\d{4}$/u).nullable(),
+    taxRate: z.number().min(0).max(100),
+    addressStreet: z.string().max(180).nullable(),
+    addressNumber: z.string().max(30).nullable(),
+    addressComplement: z.string().max(120).nullable(),
+    addressNeighborhood: z.string().max(120).nullable(),
+    addressCity: z.string().max(120).nullable(),
+    addressState: z.string().length(2).nullable(),
+    addressPostalCode: z.string().regex(/^\d{8}$/u).nullable(),
+    letterheadFileId: z.uuid().nullable(),
+    signatureFileId: z.uuid().nullable(),
+  })
+  .strict()
+
+const companySettingsSnapshotSchema = z
+  .object({
+    companyId: z.uuid(),
+    representativeName: z.string().max(160).nullable(),
+    representativeRole: z.string().max(120).nullable(),
+    maskedRepresentativeDocument: z.string().regex(/^••••\d{4}$/u).nullable(),
+    taxRate: z.number().min(0).max(100),
+    addressStreet: z.string().max(180).nullable(),
+    addressNumber: z.string().max(30).nullable(),
+    addressComplement: z.string().max(120).nullable(),
+    addressNeighborhood: z.string().max(120).nullable(),
+    addressCity: z.string().max(120).nullable(),
+    addressState: z.string().length(2).nullable(),
+    addressPostalCode: z.string().regex(/^\d{8}$/u).nullable(),
+    consolidatedAddress: z.string().nullable(),
+    letterheadFileId: z.uuid().nullable(),
+    signatureFileId: z.uuid().nullable(),
+    version: z.int().positive(),
+    updatedAt: z.iso.datetime({ offset: true }),
+    canEdit: z.boolean(),
+    banks: z.array(bankAccountSummarySnapshotSchema),
+  })
+  .strict()
+
+const companySettingsDraftSnapshotSchema = z
+  .object({
+    payload: companySettingsDraftPayloadSchema,
+    baseVersion: z.int().positive(),
+    version: z.int().positive(),
+    updatedAt: z.iso.datetime({ offset: true }),
+  })
+  .strict()
+
+export type CompanySettingsSnapshot = z.infer<typeof companySettingsSnapshotSchema>
+export type CompanySettingsDraftPayload = z.infer<typeof companySettingsDraftPayloadSchema>
+export type CompanySettingsDraftSnapshot = z.infer<typeof companySettingsDraftSnapshotSchema>
 
 export const bffDb = {
   async consumeRateLimit(input: {
@@ -1909,5 +1989,173 @@ export const bffDb = {
     `
     if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
     return platformDashboardSnapshotSchema.parse(row.result)
+  },
+
+  async getOwnProfile(input: {
+    actorUserId: string
+    sessionId: string
+  }): Promise<OwnProfileSnapshot> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: unknown }]>`
+      select private.internal_get_own_profile(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return ownProfileSnapshotSchema.parse(row.result)
+  },
+
+  async updateOwnProfile(input: {
+    actorUserId: string
+    sessionId: string
+    displayName: string
+    expectedVersion: number
+    correlationId: string
+  }): Promise<OwnProfileSnapshot> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: unknown }]>`
+      select private.internal_update_own_profile(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.displayName},
+        ${input.expectedVersion}::bigint,
+        ${input.correlationId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return ownProfileSnapshotSchema.parse(row.result)
+  },
+
+  async attachOwnAvatar(input: {
+    actorUserId: string
+    sessionId: string
+    fileId: string
+    expectedVersion: number
+    correlationId: string
+  }): Promise<OwnProfileSnapshot> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: unknown }]>`
+      select private.internal_attach_own_avatar(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.fileId}::uuid,
+        ${input.expectedVersion}::bigint,
+        ${input.correlationId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return ownProfileSnapshotSchema.parse(row.result)
+  },
+
+  async syncConfirmedProfileEmail(input: {
+    actorUserId: string
+    sessionId: string
+    correlationId: string
+  }): Promise<OwnProfileSnapshot> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: unknown }]>`
+      select private.internal_sync_confirmed_profile_email(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.correlationId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return ownProfileSnapshotSchema.parse(row.result)
+  },
+
+  async getOwnCompanySettings(input: {
+    actorUserId: string
+    sessionId: string
+  }): Promise<CompanySettingsSnapshot> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: unknown }]>`
+      select private.internal_get_own_company_settings(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return companySettingsSnapshotSchema.parse(row.result)
+  },
+
+  async updateOwnCompanySettings(input: {
+    actorUserId: string
+    sessionId: string
+    payload: CompanySettingsDraftPayload
+    expectedVersion: number
+    correlationId: string
+  }): Promise<CompanySettingsSnapshot> {
+    const sql = await getSql()
+    const value = companySettingsDraftPayloadSchema.parse(input.payload)
+    const [row] = await sql<[{ result: unknown }]>`
+      select private.internal_update_own_company_settings(
+        ${input.actorUserId}::uuid, ${input.sessionId}::uuid,
+        ${value.representativeName}, ${value.representativeRole},
+        ${value.representativeDocumentAction},
+        ${value.representativeDocumentCiphertext}, ${value.representativeDocumentIv},
+        ${value.representativeDocumentTag}, ${value.representativeDocumentKeyVersion},
+        ${value.representativeDocumentLast4}, ${value.taxRate},
+        ${value.addressStreet}, ${value.addressNumber}, ${value.addressComplement},
+        ${value.addressNeighborhood}, ${value.addressCity}, ${value.addressState},
+        ${value.addressPostalCode}, ${value.letterheadFileId}::uuid,
+        ${value.signatureFileId}::uuid, ${input.expectedVersion}::bigint,
+        ${input.correlationId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return companySettingsSnapshotSchema.parse(row.result)
+  },
+
+  async getOwnCompanySettingsDraft(input: {
+    actorUserId: string
+    sessionId: string
+  }): Promise<CompanySettingsDraftSnapshot | null> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: unknown }]>`
+      select private.internal_get_own_company_settings_draft(
+        ${input.actorUserId}::uuid, ${input.sessionId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return companySettingsDraftSnapshotSchema.nullable().parse(row.result)
+  },
+
+  async upsertOwnCompanySettingsDraft(input: {
+    actorUserId: string
+    sessionId: string
+    payload: CompanySettingsDraftPayload
+    baseVersion: number
+    expectedDraftVersion: number | null
+    correlationId: string
+  }): Promise<CompanySettingsDraftSnapshot> {
+    const sql = await getSql()
+    const payload = companySettingsDraftPayloadSchema.parse(input.payload)
+    const [row] = await sql<[{ result: unknown }]>`
+      select private.internal_upsert_own_company_settings_draft(
+        ${input.actorUserId}::uuid, ${input.sessionId}::uuid,
+        ${JSON.stringify(payload)}::jsonb, ${input.baseVersion}::bigint,
+        ${input.expectedDraftVersion}::bigint, ${input.correlationId}::uuid
+      ) as result
+    `
+    if (row === undefined) throw new Error(BFF_DATABASE_FAILURE)
+    return companySettingsDraftSnapshotSchema.parse(row.result)
+  },
+
+  async deleteOwnCompanySettingsDraft(input: {
+    actorUserId: string
+    sessionId: string
+  }): Promise<boolean> {
+    const sql = await getSql()
+    const [row] = await sql<[{ result: boolean }]>`
+      select private.internal_delete_own_company_settings_draft(
+        ${input.actorUserId}::uuid, ${input.sessionId}::uuid
+      ) as result
+    `
+    if (row === undefined || typeof row.result !== "boolean") {
+      throw new Error(BFF_DATABASE_FAILURE)
+    }
+    return row.result
   },
 }

@@ -471,7 +471,7 @@ describe("CSRF token route", () => {
 })
 
 describe("rate-limit policy boundary", () => {
-  it("exports only the fourteen frozen bucket literals through a two-argument consume API", () => {
+  it("exports only the fifteen frozen bucket literals through a two-argument consume API", () => {
     expectTypeOf<RateLimitBucket>().toEqualTypeOf<
       | "login-ip-volume"
       | "login-account-failure"
@@ -487,6 +487,7 @@ describe("rate-limit policy boundary", () => {
       | "administrative-password-reset"
       | "bank-account-mutation"
       | "platform-observability-read"
+      | "company-settings-draft"
     >()
     expectTypeOf<Parameters<typeof consumeRateLimit>>().toEqualTypeOf<
       [bucket: RateLimitBucket, rawKey: string]
@@ -510,6 +511,7 @@ describe("rate-limit policy boundary", () => {
     ["administrative-password-reset", 10, 3_600, 3_600],
     ["bank-account-mutation", 30, 3_600, 3_600],
     ["platform-observability-read", 120, 60, 60],
+    ["company-settings-draft", 30, 60, 60],
   ] as const)(
     "maps %s to its exact immutable database tuple",
     async (bucket, limit, windowSeconds, blockSeconds) => {

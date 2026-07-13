@@ -121,6 +121,7 @@ select results_eq(
   $$values
     ('administrative-password-reset', 10, 3600, 3600, false),
     ('bank-account-mutation', 30, 3600, 3600, false),
+    ('company-settings-draft', 30, 60, 60, false),
     ('file-download-user', 60, 60, 60, false),
     ('file-mutation-user', 20, 60, 60, false),
     ('forgot-account-volume', 3, 3600, 3600, false),
@@ -133,7 +134,7 @@ select results_eq(
     ('reauth-account-failure', 5, 900, 900, true),
     ('reauth-ip-volume', 20, 900, 1800, false),
     ('user-provisioning', 20, 3600, 3600, false)$$,
-  'policies de rate limit contêm exatamente as quatorze tuplas congeladas'
+  'policies de rate limit contêm exatamente as quinze tuplas congeladas'
 );
 select results_eq(
   $$select namespace.nspname::text collate "default",
@@ -712,15 +713,20 @@ select results_eq(
     ('private.fail_password_recovery(uuid,text,uuid)'),
     ('private.fail_temporary_password_reset(uuid,uuid,uuid,text,uuid)'),
     ('private.internal_archive_bank_account(uuid,uuid,uuid,uuid,uuid,text,bigint,uuid)'),
+    ('private.internal_attach_own_avatar(uuid,uuid,uuid,bigint,uuid)'),
     ('private.internal_begin_file_finalization(uuid,uuid,uuid)'),
     ('private.internal_commit_company_admin_provisioning(uuid,uuid,uuid,uuid,uuid,text,text,module_key[],uuid)'),
     ('private.internal_commit_company_provisioning(uuid,uuid,uuid,uuid,uuid,text,text,text,text,text,text,text,text,module_key[],uuid)'),
     ('private.internal_complete_company_access_reconciliation(uuid,uuid,uuid,uuid[],uuid)'),
     ('private.internal_complete_member_auth_access_reconciliation(uuid,uuid,uuid,uuid,boolean,text,uuid)'),
+    ('private.internal_delete_own_company_settings_draft(uuid,uuid)'),
     ('private.internal_finalize_file_upload(uuid,uuid,uuid,uuid,text,text,text,bigint,text,uuid)'),
     ('private.internal_find_provisioning_auth_user(uuid,uuid,uuid,text)'),
     ('private.internal_get_company_detail(uuid,uuid,uuid)'),
     ('private.internal_get_company_user(uuid,uuid,uuid)'),
+    ('private.internal_get_own_company_settings_draft(uuid,uuid)'),
+    ('private.internal_get_own_company_settings(uuid,uuid)'),
+    ('private.internal_get_own_profile(uuid,uuid)'),
     ('private.internal_get_platform_company_admin(uuid,uuid,uuid)'),
     ('private.internal_get_platform_dashboard(uuid,uuid)'),
     ('private.internal_get_platform_health(uuid,uuid)'),
@@ -738,8 +744,12 @@ select results_eq(
     ('private.internal_reserve_company_provisioning(uuid,uuid,text,text,text,uuid)'),
     ('private.internal_set_company_status(uuid,uuid,uuid,company_status,bigint,text,uuid)'),
     ('private.internal_set_default_bank_account(uuid,uuid,uuid,uuid,bigint,uuid)'),
+    ('private.internal_sync_confirmed_profile_email(uuid,uuid,uuid)'),
     ('private.internal_update_company(uuid,uuid,uuid,text,text,text,text,text,bigint,uuid)'),
+    ('private.internal_update_own_company_settings(uuid,uuid,text,text,text,text,text,text,integer,text,numeric,text,text,text,text,text,text,text,uuid,uuid,bigint,uuid)'),
+    ('private.internal_update_own_profile(uuid,uuid,text,bigint,uuid)'),
     ('private.internal_upsert_bank_account(uuid,uuid,uuid,uuid,text,text,text,text,text,integer,text,text,text,text,integer,text,bank_account_type,text,text,text,text,integer,text,boolean,bigint,uuid)'),
+    ('private.internal_upsert_own_company_settings_draft(uuid,uuid,jsonb,bigint,bigint,uuid)'),
     ('private.list_company_user_directory(uuid,uuid,uuid,integer,text)'),
     ('private.register_auth_session(uuid,uuid,boolean)'),
     ('private.release_upload_authorization_retirement_claim(uuid,uuid,bigint,text)'),
@@ -748,7 +758,7 @@ select results_eq(
     ('private.rotate_app_session_after_reauthentication(uuid,uuid,uuid,uuid)'),
     ('private.write_authenticated_audit_event(uuid,uuid,text,text,uuid,audit_outcome,text,uuid,text,text,jsonb)'),
     ('private.write_security_event(text,uuid,text,text,audit_outcome,text,uuid,jsonb)')$$,
-  'axsys_bff recebe exatamente cinquenta e cinco EXECUTEs efetivos'
+  'axsys_bff recebe exatamente sessenta e quatro EXECUTEs efetivos'
 );
 select results_eq(
   $$select role_name::text collate "default",

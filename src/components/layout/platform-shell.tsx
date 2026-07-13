@@ -7,6 +7,7 @@ import {
   HeartbeatIcon,
   ScrollIcon,
   SignOutIcon,
+  UserCircleIcon,
   UsersThreeIcon,
 } from "@phosphor-icons/react"
 
@@ -32,6 +33,7 @@ const PLATFORM_ITEMS = Object.freeze([
   },
   { href: "/platform/auditoria", icon: ScrollIcon, label: "Auditoria" },
   { href: "/platform/saude", icon: HeartbeatIcon, label: "Saúde" },
+  { href: "/platform/perfil", icon: UserCircleIcon, label: "Perfil" },
 ] satisfies readonly NavigationItem[])
 
 type PlatformShellProps = Readonly<{
