@@ -8,6 +8,8 @@ const ROOTS = [
   "src/modules/administrative/server/client-service.ts",
   "src/modules/administrative/server/catalog-item-repository.ts",
   "src/modules/administrative/server/catalog-item-service.ts",
+  "src/modules/proposals/server/proposal-repository.ts",
+  "src/modules/proposals/server/proposal-service.ts",
 ] as const
 
 describe("administrative mutation boundary", () => {
@@ -52,6 +54,26 @@ describe("administrative mutation boundary", () => {
       "deleteCatalogItem",
     ]) {
       expect(catalog).toContain(`bffDb.${name}`)
+    }
+  })
+
+  it("delegates proposal writes to the restricted BFF only", async () => {
+    const source = await readFile(
+      path.join(
+        process.cwd(),
+        "src/modules/proposals/server/proposal-repository.ts",
+      ),
+      "utf8",
+    )
+
+    for (const name of [
+      "createProposal",
+      "updateDraftProposal",
+      "saveProposalItems",
+      "transitionProposalStatus",
+      "deleteDraftProposal",
+    ]) {
+      expect(source).toContain(`bffDb.${name}`)
     }
   })
 })

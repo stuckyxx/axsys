@@ -45,5 +45,36 @@ export const proposalCreateSchema = z
 
 export const proposalItemsSchema = z.array(proposalLineSchema).min(1).max(100)
 
+export const proposalDetailsUpdateSchema = z
+  .object({
+    version: z.int().positive(),
+    clientId: z.uuid(),
+    segment: z.string().trim().min(2).max(80),
+    issuedOn: z.iso.date(),
+  })
+  .strict()
+
+export const proposalItemsUpdateSchema = z
+  .object({
+    version: z.int().positive(),
+    items: proposalItemsSchema,
+  })
+  .strict()
+
+export const proposalDraftUpdateSchema = z.union([
+  proposalDetailsUpdateSchema,
+  proposalItemsUpdateSchema,
+])
+
+export const proposalStatusUpdateSchema = z
+  .object({
+    expectedVersion: z.int().positive(),
+    nextStatus: z.enum(["draft", "sent", "approved", "rejected"]),
+  })
+  .strict()
+
+export const proposalDeleteSchema = z.object({ version: z.int().positive() }).strict()
+
 export type ProposalLineInput = z.infer<typeof proposalLineSchema>
 export type ProposalCreateInput = z.infer<typeof proposalCreateSchema>
+export type ProposalDraftUpdateInput = z.infer<typeof proposalDraftUpdateSchema>

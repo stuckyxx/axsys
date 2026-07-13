@@ -12,7 +12,7 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe("bffDb boundary", () => {
-  it("exports only the eighty-four typed application database operations", () => {
+  it("exports only the eighty-five typed application database operations", () => {
     expect(Object.keys(bffDb).sort()).toEqual([
       "activateFileUploadAuthorization",
       "archiveBankAccount",
@@ -97,6 +97,7 @@ describe("bffDb boundary", () => {
       "upsertOwnCompanySettingsDraft",
       "versionContractAttachment",
       "writeAuthenticatedAuditEvent",
+      "writeProposalTotalMismatchSecurityEvent",
       "writeSecurityEvent",
     ])
 
@@ -184,6 +185,21 @@ describe("bffDb boundary", () => {
       ]
     >()
     expectTypeOf(bffDb.writeSecurityEvent).returns.toEqualTypeOf<Promise<void>>()
+    expectTypeOf<
+      Parameters<typeof bffDb.writeProposalTotalMismatchSecurityEvent>
+    >().toEqualTypeOf<
+      [
+        input: {
+          actorUserId: string
+          sessionId: string
+          proposalId: string | null
+          correlationId: string
+        },
+      ]
+    >()
+    expectTypeOf(
+      bffDb.writeProposalTotalMismatchSecurityEvent,
+    ).returns.toEqualTypeOf<Promise<void>>()
     expectTypeOf<
       Parameters<typeof bffDb.revokeSessionsAndWriteLogout>
     >().toEqualTypeOf<
@@ -509,6 +525,7 @@ describe("bffDb boundary", () => {
       "update_draft_proposal",
       "version_contract_attachment",
       "write_authenticated_audit_event",
+      "write_proposal_total_mismatch_security_event",
       "write_security_event",
     ])
     expect(source).toMatch(/private\.write_security_event\([\s\S]*?null::uuid,/u)

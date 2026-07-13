@@ -92,6 +92,29 @@ insert into numbering_results values ('a3',private.create_proposal(
 reset role;
 select is((select (result#>>'{record,proposal,number}')::bigint from numbering_results where label='a3'),3::bigint,
  'rejected proposal consumes no number');
+set local role axsys_bff;
+insert into numbering_results values ('delete_a3',private.delete_draft_proposal(
+ '2b000000-0000-4000-8000-000000000001','9b000000-0000-4000-8000-000000000001',
+ (select (result#>>'{record,proposal,id}')::uuid from numbering_results where label='a3'),
+ (select (result#>>'{record,proposal,version}')::bigint from numbering_results where label='a3'),
+ '8b000000-0000-4000-8000-000000000016'));
+reset role;
+select is((select result->'record' from numbering_results where label='delete_a3'),'null'::jsonb,
+ 'draft proposal deletion returns the canonical null record');
+select is((select count(*) from public.proposals
+ where company_id='3b000000-0000-4000-8000-000000000001' and number=3),0::bigint,
+ 'draft proposal deletion cascades its items without immutable-trigger failure');
+set local role axsys_bff;
+select private.write_proposal_total_mismatch_security_event(
+ '2b000000-0000-4000-8000-000000000001','9b000000-0000-4000-8000-000000000001',
+ (select (result#>>'{record,proposal,id}')::uuid from numbering_results where label='a1'),
+ '8b000000-0000-4000-8000-000000000017');
+reset role;
+select is((select count(*) from public.security_events
+ where correlation_id='8b000000-0000-4000-8000-000000000017'
+   and event_type='administrative.proposal.total_mismatch'
+   and reason_code='INTERNAL_TOTAL_MISMATCH'),1::bigint,
+ 'proposal total mismatch uses the dedicated actor/session-verified security writer');
 select results_eq(
  $$select item.line_total,proposal.total from public.proposal_items item
    join public.proposals proposal on proposal.id=item.proposal_id

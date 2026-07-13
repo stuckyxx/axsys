@@ -940,6 +940,23 @@ export const bffDb = {
     `
   },
 
+  async writeProposalTotalMismatchSecurityEvent(input: {
+    actorUserId: string
+    sessionId: string
+    proposalId: string | null
+    correlationId: string
+  }): Promise<void> {
+    const sql = await getSql()
+    await sql`
+      select private.write_proposal_total_mismatch_security_event(
+        ${input.actorUserId}::uuid,
+        ${input.sessionId}::uuid,
+        ${input.proposalId}::uuid,
+        ${input.correlationId}::uuid
+      )
+    `
+  },
+
   async revokeSessionsAndWriteLogout(input: {
     actorUserId: string
     sessionId: string

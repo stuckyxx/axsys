@@ -2,10 +2,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const source = readFileSync("src/lib/db/bff.ts", "utf8");
-const migration = readFileSync(
+const migration = [
   "supabase/migrations/20260713004222_administrative_rls.sql",
-  "utf8",
-);
+  "supabase/migrations/20260713015131_proposal_total_mismatch_security_event.sql",
+].map((file) => readFileSync(file, "utf8")).join("\n");
 
 const routines = [
   "create_client",
@@ -28,6 +28,7 @@ const routines = [
   "close_contract",
   "delete_contract",
   "version_contract_attachment",
+  "write_proposal_total_mismatch_security_event",
 ] as const;
 
 const methods = [
@@ -51,6 +52,7 @@ const methods = [
   "closeContract",
   "deleteContract",
   "versionContractAttachment",
+  "writeProposalTotalMismatchSecurityEvent",
 ] as const;
 
 describe("administrative BFF boundary", () => {
