@@ -608,6 +608,139 @@ export type Database = {
           },
         ]
       }
+      contract_attachments: {
+        Row: {
+          attachment_group_id: string
+          company_id: string
+          contract_id: string
+          created_at: string
+          created_by: string
+          file_object_id: string
+          id: string
+          superseded_at: string | null
+          superseded_by: string | null
+          version: number
+        }
+        Insert: {
+          attachment_group_id?: string
+          company_id: string
+          contract_id: string
+          created_at?: string
+          created_by: string
+          file_object_id: string
+          id?: string
+          superseded_at?: string | null
+          superseded_by?: string | null
+          version: number
+        }
+        Update: {
+          attachment_group_id?: string
+          company_id?: string
+          contract_id?: string
+          created_at?: string
+          created_by?: string
+          file_object_id?: string
+          id?: string
+          superseded_at?: string | null
+          superseded_by?: string | null
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contract_attachments_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contract_attachments_contract_fk"
+            columns: ["company_id", "contract_id"]
+            isOneToOne: false
+            referencedRelation: "contracts"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "contract_attachments_file_fk"
+            columns: ["company_id", "file_object_id"]
+            isOneToOne: true
+            referencedRelation: "file_objects"
+            referencedColumns: ["company_id", "id"]
+          },
+        ]
+      }
+      contracts: {
+        Row: {
+          amount: number
+          client_id: string
+          close_reason: string | null
+          closed_at: string | null
+          closed_by: string | null
+          company_id: string
+          created_at: string
+          created_by: string
+          ends_on: string
+          id: string
+          number: string
+          object: string
+          starts_on: string
+          updated_at: string
+          updated_by: string
+          version: number
+        }
+        Insert: {
+          amount: number
+          client_id: string
+          close_reason?: string | null
+          closed_at?: string | null
+          closed_by?: string | null
+          company_id: string
+          created_at?: string
+          created_by: string
+          ends_on: string
+          id?: string
+          number: string
+          object: string
+          starts_on: string
+          updated_at?: string
+          updated_by: string
+          version?: number
+        }
+        Update: {
+          amount?: number
+          client_id?: string
+          close_reason?: string | null
+          closed_at?: string | null
+          closed_by?: string | null
+          company_id?: string
+          created_at?: string
+          created_by?: string
+          ends_on?: string
+          id?: string
+          number?: string
+          object?: string
+          starts_on?: string
+          updated_at?: string
+          updated_by?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contracts_client_fk"
+            columns: ["company_id", "client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "contracts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       file_objects: {
         Row: {
           archived_at: string | null
@@ -796,6 +929,73 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "companies"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      generated_documents: {
+        Row: {
+          checksum_sha256: string
+          company_id: string
+          created_at: string
+          created_by: string
+          file_object_id: string
+          id: string
+          immutable_snapshot: Json
+          kind: Database["public"]["Enums"]["document_kind"]
+          payment_request_id: string | null
+          proposal_id: string | null
+          template_version: string
+          version: number
+        }
+        Insert: {
+          checksum_sha256: string
+          company_id: string
+          created_at?: string
+          created_by: string
+          file_object_id: string
+          id?: string
+          immutable_snapshot: Json
+          kind: Database["public"]["Enums"]["document_kind"]
+          payment_request_id?: string | null
+          proposal_id?: string | null
+          template_version: string
+          version: number
+        }
+        Update: {
+          checksum_sha256?: string
+          company_id?: string
+          created_at?: string
+          created_by?: string
+          file_object_id?: string
+          id?: string
+          immutable_snapshot?: Json
+          kind?: Database["public"]["Enums"]["document_kind"]
+          payment_request_id?: string | null
+          proposal_id?: string | null
+          template_version?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "generated_documents_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "generated_documents_file_fk"
+            columns: ["company_id", "file_object_id"]
+            isOneToOne: false
+            referencedRelation: "file_objects"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "generated_documents_proposal_fk"
+            columns: ["company_id", "proposal_id"]
+            isOneToOne: false
+            referencedRelation: "proposals"
+            referencedColumns: ["company_id", "id"]
           },
         ]
       }
@@ -1434,6 +1634,7 @@ export type Database = {
       bank_account_type: "checking" | "savings" | "payment"
       catalog_item_kind: "service" | "product"
       company_status: "active" | "archived"
+      document_kind: "proposal" | "payment_letter" | "payment_process"
       file_purpose:
         | "profile_avatar"
         | "company_letterhead"
@@ -1601,6 +1802,7 @@ export const Constants = {
       bank_account_type: ["checking", "savings", "payment"],
       catalog_item_kind: ["service", "product"],
       company_status: ["active", "archived"],
+      document_kind: ["proposal", "payment_letter", "payment_process"],
       file_purpose: [
         "profile_avatar",
         "company_letterhead",

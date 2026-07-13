@@ -1,5 +1,5 @@
 begin;
-select plan(32);
+select plan(56);
 select has_table('public','clients','clients exists');
 select has_table('public','catalog_items','catalog_items exists');
 select has_column('public','clients','company_id','clients carries tenant');
@@ -39,5 +39,43 @@ select ok(exists(select 1 from pg_constraint where conname='proposal_items_catal
  and conrelid='public.proposal_items'::regclass),'proposal item catalog snapshot is tenant bound');
 select has_index('public','proposals','proposals_company_status_idx','proposal status cursor is indexed');
 select has_index('public','proposal_items','proposal_items_proposal_idx','proposal items are indexed');
+select has_table('public','contracts','contracts exists');
+select has_table('public','contract_attachments','contract attachments exist');
+select has_table('public','generated_documents','generated documents exist');
+select col_type_is('public','contracts','amount','numeric(14,2)','contract amount is exact');
+select col_type_is('public','contracts','version','bigint','contracts use optimistic version');
+select has_column('public','contract_attachments','attachment_group_id','attachment history has a stable group');
+select col_type_is('public','contract_attachments','version','integer','attachment version is positive integer');
+select has_column('public','generated_documents','payment_request_id','shared documents support payment parents');
+select has_column('public','generated_documents','checksum_sha256','generated document checksum exists');
+select has_column('public','generated_documents','immutable_snapshot','generated document snapshot exists');
+select has_column('public','generated_documents','template_version','generated document template version exists');
+select ok(exists(select 1 from pg_constraint where conname='contracts_company_id_id_client_key'
+ and conrelid='public.contracts'::regclass),'contract exposes tenant/client composite key');
+select ok(exists(select 1 from pg_constraint where conname='contracts_client_fk'
+ and conrelid='public.contracts'::regclass),'contract client is tenant bound');
+select ok(exists(select 1 from pg_constraint where conname='contracts_dates_check'
+ and conrelid='public.contracts'::regclass),'contract dates are coherent');
+select ok(exists(select 1 from pg_constraint where conname='contracts_closure_check'
+ and conrelid='public.contracts'::regclass),'contract closure actor and reason are coherent');
+select ok(exists(select 1 from pg_constraint where conname='contract_attachments_contract_fk'
+ and conrelid='public.contract_attachments'::regclass),'attachment contract is tenant bound');
+select ok(exists(select 1 from pg_constraint where conname='contract_attachments_file_fk'
+ and conrelid='public.contract_attachments'::regclass),'attachment file is tenant bound without cascade');
+select has_index('public','contract_attachments','contract_attachments_one_current_uidx','one current attachment version is enforced');
+select ok((select array_agg(e.enumlabel::text order by e.enumsortorder)
+  from pg_type t join pg_enum e on e.enumtypid=t.oid
+  join pg_namespace n on n.oid=t.typnamespace
+  where n.nspname='public' and t.typname='document_kind')
+ = array['proposal','payment_letter','payment_process'],'shared document kinds are stable');
+select ok(exists(select 1 from pg_constraint where conname='generated_documents_exact_parent_check'
+ and conrelid='public.generated_documents'::regclass),'generated documents have exactly one kind-appropriate parent');
+select ok(exists(select 1 from pg_constraint where conname='generated_documents_proposal_fk'
+ and conrelid='public.generated_documents'::regclass),'proposal documents are tenant bound');
+select ok(exists(select 1 from pg_constraint where conname='generated_documents_parent_version_key'
+ and conrelid='public.generated_documents'::regclass),'generated document parent versions are unique');
+select ok(exists(select 1 from pg_trigger where tgname='generated_documents_immutable'
+ and tgrelid='public.generated_documents'::regclass and not tgisinternal),'generated document mutation is rejected');
+select has_index('public','generated_documents','generated_documents_proposal_idx','proposal document history is indexed');
 select * from finish();
 rollback;
